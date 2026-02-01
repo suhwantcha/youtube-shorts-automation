@@ -9,3 +9,5 @@ venv/
 
 # Test output
 *.txt
+
+.env
