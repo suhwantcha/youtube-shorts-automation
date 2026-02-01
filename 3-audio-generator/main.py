@@ -56,7 +56,7 @@ def generate_audio(script_text: str, output_filename: str) -> Dict[str, Any]:
     # 3. 오디오 설정: MP3, 192kbps (고품질)
     audio_config = texttospeech.AudioConfig(
         audio_encoding=texttospeech.AudioEncoding.MP3,
-        speaking_rate=1.05,  # 5% 빠르게 (숏츠 최적화)
+        speaking_rate=1.5,  # 50% 빠르게 (숏츠 최적화)
         pitch=0.0,           # 기본 피치
         volume_gain_db=0.0,  # 볼륨 기본
         sample_rate_hertz=24000,

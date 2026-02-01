@@ -167,23 +167,25 @@ class PexelsDownloader:
             
             for video in data.get("videos", []):
                 # 세로 영상만 선택 (9:16 비율)
-                if video["height"] > video["width"]:
+                if video.get("height", 0) > video.get("width", 0):
                     # HD 품질 영상 찾기
                     hd_file = None
-                    for file in video["video_files"]:
-                        if file["height"] >= 1080 and "hd" in file["quality"]:
-                            hd_file = file
-                            break
+                    video_files = video.get("video_files", [])
+                    if video_files:
+                        for file in video_files:
+                            if file.get("height", 0) >= 1080 and file.get("quality") and "hd" in file["quality"]:
+                                hd_file = file
+                                break
                     
-                    if hd_file and video["duration"] >= min_duration:
+                    if hd_file and video.get("duration", 0) >= min_duration:
                         clips.append(VideoClip(
                             id=video["id"],
                             url=video["url"],
-                            duration=video["duration"],
-                            width=hd_file["width"],
-                            height=hd_file["height"],
-                            quality=hd_file["quality"],
-                            download_url=hd_file["link"]
+                            duration=video.get("duration", 0),
+                            width=hd_file.get("width", 0),
+                            height=hd_file.get("height", 0),
+                            quality=hd_file.get("quality", "hd"),
+                            download_url=hd_file.get("link")
                         ))
             
             logger.info(f"'{query}' 검색 결과: {len(clips)}개 영상 발견")
