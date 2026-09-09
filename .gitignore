@@ -7,7 +7,17 @@ __pycache__/
 env/
 venv/
 
-# Test output
-*.txt
+# Runtime and generated output
+.venv/
+.pytest_cache/
+output/
+*.log
+*.sqlite3*
+concat_list.txt
 
 .env
+.env.*
+!.env.example
+*credentials*.json
+*token*.json
+secrets/

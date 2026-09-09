@@ -1,0 +1,13 @@
+.git
+.gitignore
+.gcloudignore
+.env
+.env.*
+.venv
+output
+legacy
+tests
+secrets
+**/__pycache__
+**/*credentials*.json
+**/*token*.json

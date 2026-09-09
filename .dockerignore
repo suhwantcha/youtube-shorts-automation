@@ -1,0 +1,6 @@
+**
+!Dockerfile
+!requirements-lock.txt
+!tech_shorts/
+!tech_shorts/**
+**/__pycache__/**
