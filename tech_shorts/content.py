@@ -4,6 +4,7 @@ import logging
 import os
 from pathlib import Path
 import re
+from itertools import zip_longest
 
 import requests
 
@@ -29,7 +30,7 @@ def collect_trends(limit=10):
             r = requests.get(f"https://hacker-news.firebaseio.com/v0/item/{int(story_id)}.json", timeout=10)
             r.raise_for_status()
             story = r.json() or {}
-            if story.get("type") != "story" or not story.get("title") or story.get("dead"):
+            if story.get("type") != "story" or not story.get("title") or story.get("dead") or story.get("deleted"):
                 continue
             topics.append(dict(title=story["title"], url=story.get("url", f"https://news.ycombinator.com/item?id={story_id}"),
                                score=story.get("score", 0), source="Hacker News"))
@@ -42,7 +43,7 @@ def collect_trends(limit=10):
     return topics
 
 
-def collect_reddit_trends(limit=5):
+def collect_reddit_trends(limit=10):
     client_id, secret, user_agent = require_env("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT")
     token_response = requests.post("https://www.reddit.com/api/v1/access_token", auth=(client_id, secret),
                                   data={"grant_type": "client_credentials"}, headers={"User-Agent": user_agent}, timeout=20)
@@ -60,21 +61,30 @@ def collect_reddit_trends(limit=5):
     return sorted(topics, key=lambda t: t["score"], reverse=True)[:limit]
 
 
-def all_trends():
-    topics = []
-    errors = []
+def all_trends(limit=10):
+    batches = []
     collectors = [collect_trends]
     if all(os.getenv(k) for k in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT")):
         collectors.append(collect_reddit_trends)
     for collector in collectors:
         try:
-            topics.extend(collector())
+            batches.append(sorted(collector(limit=limit), key=lambda t: t.get("score", 0), reverse=True))
         except (requests.RequestException, ValueError, KeyError):
-            errors.append(collector.__name__)
-    unique = {topic["url"]: topic for topic in topics if topic.get("url")}
+            continue
+    unique = {}
+    titles = set()
+    for row in zip_longest(*batches):
+        for topic in row:
+            if not topic or not topic.get("url"):
+                continue
+            url = topic["url"].rstrip("/")
+            title = topic["title"].strip().casefold()
+            if url not in unique and title not in titles:
+                unique[url] = topic
+                titles.add(title)
     if not unique:
         raise ValueError("트렌드 수집에 실패했습니다. 주제와 자료를 직접 입력해주세요.")
-    return list(unique.values())
+    return list(unique.values())[:limit]
 
 
 def clean_script(script):
@@ -124,11 +134,36 @@ def generate_audio(script, output, settings):
     output.parent.mkdir(parents=True, exist_ok=True)
     part = output.with_suffix(".part.mp3")
     try:
-        with client().audio.speech.with_streaming_response.create(
+        provider = settings.tts_provider
+        if provider == "auto":
+            provider = "elevenlabs" if os.getenv("ELEVENLABS_API_KEY") else "openai"
+        if provider == "elevenlabs":
+            key, = require_env("ELEVENLABS_API_KEY")
+            if not 0.7 <= settings.speed <= 1.2:
+                raise ValueError("ElevenLabs 음성 속도는 0.7~1.2 사이여야 합니다.")
+            if not re.fullmatch(r"[a-zA-Z0-9_-]+", settings.elevenlabs_voice_id):
+                raise ValueError("ELEVENLABS_VOICE_ID 설정을 확인해주세요.")
+            with requests.post(
+                f"https://api.elevenlabs.io/v1/text-to-speech/{settings.elevenlabs_voice_id}",
+                headers={"xi-api-key": key, "Accept": "audio/mpeg"},
+                params={"output_format": "mp3_44100_128"},
+                json={"text": script, "model_id": settings.elevenlabs_model,
+                      "language_code": "ko", "voice_settings": {"stability": 0.5,
+                      "similarity_boost": 0.75, "style": 0.0, "use_speaker_boost": True,
+                      "speed": settings.speed}}, stream=True, timeout=(15, 120),
+            ) as response:
+                response.raise_for_status()
+                with part.open("wb") as stream:
+                    for chunk in response.iter_content(65536):
+                        stream.write(chunk)
+        elif provider == "openai":
+            with client().audio.speech.with_streaming_response.create(
             model=settings.tts_model, voice=settings.voice, input=script, speed=settings.speed,
             response_format="mp3", instructions="자연스럽고 명료한 한국어로 읽어주세요. 중요한 사실을 강조하고 친근한 숏츠 내레이션 톤을 사용하세요.",
-        ) as response:
-            response.stream_to_file(part)
+            ) as response:
+                response.stream_to_file(part)
+        else:
+            raise ValueError("음성 서비스는 auto, openai, elevenlabs 중 선택해주세요.")
         report = inspect(part)
         if not report["has_audio"]:
             raise ValueError("생성된 파일에 음성이 없습니다.")
@@ -147,20 +182,20 @@ def generate_subtitles(audio, output):
     Path(output).write_text(srt, encoding="utf-8")
 
 
-def search_backgrounds(queries, directory, count=3):
+def search_backgrounds(queries, directory, count=5):
     key, = require_env("PEXELS_API_KEY")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     results, seen = [], set()
     for query in list(queries)[:3] + ["coding laptop", "server room"]:
         response = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
-                                params={"query": query, "per_page": 12, "size": "medium"}, timeout=30)
+                                params={"query": query, "per_page": 12, "size": "large", "orientation": "portrait"}, timeout=30)
         response.raise_for_status()
         for video in response.json().get("videos", []):
             if video["id"] in seen or video.get("duration", 0) < 3:
                 continue
             files = [f for f in video.get("video_files", []) if f.get("file_type") == "video/mp4"
-                     and (f.get("width") or 0) >= 640 and (f.get("height") or 0) >= 640 and f.get("link")]
+                     and (f.get("width") or 0) >= 1080 and (f.get("height") or 0) >= 1920 and f.get("link")]
             if not files:
                 continue
             # Favor portrait and approximately FHD rather than downloading 4K for every scene.

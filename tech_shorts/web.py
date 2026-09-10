@@ -33,7 +33,7 @@ def create_app(settings=None, store=None):
             try:
                 fn(*args)
             except Exception:
-                log.exception("작업 처리 실패")
+                log.error("작업 처리 실패")
         if app.config.get("TESTING_SYNC"):
             execute()
         else:
@@ -90,7 +90,7 @@ def create_app(settings=None, store=None):
             return jsonify(error="작업 또는 결과 파일을 찾을 수 없습니다."), 404
         if isinstance(exc, (ValueError, FileNotFoundError)):
             return jsonify(error=str(exc)), 400
-        log.exception("요청 처리 실패")
+        log.error("요청 처리 실패 (%s)", type(exc).__name__)
         return jsonify(error=safe_error(exc)), 500
 
     def body():
@@ -120,12 +120,13 @@ def create_app(settings=None, store=None):
     @app.get("/api/config")
     def config():
         return jsonify(csrf=csrf(), connections={
+            "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
             "openai": bool(os.getenv("OPENAI_API_KEY")), "pexels": bool(os.getenv("PEXELS_API_KEY")),
             "youtube": all(os.getenv(k) for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")),
             "tiktok": bool(os.getenv("TIKTOK_ACCESS_TOKEN")),
             "instagram": all(os.getenv(k) for k in ("INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID", "META_API_VERSION")) and bool(settings.bucket),
             "gmail": all(os.getenv(k) for k in ("ADMIN_EMAIL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")) and bool(settings.api_token and settings.base_url),
-        }, backend=settings.backend, defaults={"voice": settings.voice, "speed": settings.speed})
+        }, backend=settings.backend, defaults={"voice": settings.voice, "speed": settings.speed, "tts_provider": settings.tts_provider})
 
     @app.get("/api/trends")
     def trends():

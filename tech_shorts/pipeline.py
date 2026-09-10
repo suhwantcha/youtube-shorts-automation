@@ -22,11 +22,14 @@ def validate_inputs(data, allow_local=False):
         result[key] = value.strip()
     if not result["script"] and not (result["topic"] and result["notes"]):
         raise ValueError("직접 작성한 대본 또는 주제와 참고 자료를 입력해주세요.")
+    result["tts_provider"] = data.get("tts_provider", "auto")
+    if result["tts_provider"] not in {"auto", "openai", "elevenlabs"}:
+        raise ValueError("지원하지 않는 음성 서비스입니다.")
     result["voice"] = data.get("voice", "onyx")
     if result["voice"] not in {"onyx", "nova", "coral", "alloy", "ash", "sage", "shimmer", "marin", "cedar"}:
         raise ValueError("지원하지 않는 음성입니다.")
     try:
-        result["speed"] = float(data.get("speed", 1.25))
+        result["speed"] = float(data.get("speed", 1.1))
     except (TypeError, ValueError):
         raise ValueError("음성 속도는 숫자여야 합니다.")
     if not 0.5 <= result["speed"] <= 2:
@@ -56,7 +59,8 @@ class Pipeline:
         job = self.store.update(job_id, {"status": "running", "stage": "대본 준비", "error": None}, expected={"queued"})
         work = self.artifacts.directory(job_id)
         inputs = job["inputs"]
-        settings = replace(self.settings, voice=inputs["voice"], speed=inputs["speed"])
+        settings = replace(self.settings, voice=inputs["voice"], speed=inputs["speed"],
+                           tts_provider=inputs.get("tts_provider", self.settings.tts_provider))
         saved = dict(job.get("artifacts", {}))
 
         def save(key, path):
@@ -139,6 +143,7 @@ class Pipeline:
             save("manifest", work / "manifest.json")
             return self.store.update(job_id, {"status": "pending_approval", "stage": "영상 검토 대기", "quality": report}, expected={"running"})
         except Exception as exc:
-            log.exception("Job %s failed", job_id)
-            self.store.update(job_id, {"status": "failed", "error": str(exc)[:2000]}, expected={"running"})
+            from .service import safe_error
+            log.error("Job %s failed (%s)", job_id, type(exc).__name__)
+            self.store.update(job_id, {"status": "failed", "error": safe_error(exc)}, expected={"running"})
             raise

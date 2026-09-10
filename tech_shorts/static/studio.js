@@ -57,8 +57,41 @@ function openPublish(job){$("publish-dialog").dataset.jobId=job.id;$("publish-ti
 $("close-publish").addEventListener("click",()=>$("publish-dialog").close());
 $("tiktok-check").addEventListener("change",async(e)=>{if(!e.target.checked)return;try{const creator=await api("/api/tiktok/creator");$("tiktok-account").textContent=`게시 계정: ${creator.creator_nickname||creator.creator_username}`;const select=$("tiktok-privacy");select.replaceChildren(new Option("공개 범위를 선택해주세요",""));for(const option of creator.privacy_level_options||[])select.add(new Option(option,option));}catch(err){e.target.checked=false;notice(err.message,true);}});
 $("publish-form").addEventListener("submit",async(e)=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{const platforms=[...document.querySelectorAll('input[name="platform"]:checked')].map(e=>e.value);await api(`/api/jobs/${$("publish-dialog").dataset.jobId}/publish`,{method:"POST",body:JSON.stringify({platforms,title:$("publish-title").value,description:$("publish-description").value,youtube_privacy:$("youtube-privacy").value,tiktok_privacy:$("tiktok-privacy").value})});$("publish-dialog").close();notice("게시 작업을 시작했습니다.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
-$("create-form").addEventListener("submit",async(e)=>{e.preventDefault();const b=$("create-button");b.disabled=true;try{const job=await api("/api/jobs",{method:"POST",body:JSON.stringify({topic:$("topic").value,notes:$("notes").value,script:$("script").value,voice:$("voice").value,speed:Number($("speed").value),background_queries:$("queries").value.split(",").map(s=>s.trim()).filter(Boolean)})});selected=job.id;notice("제작을 시작했습니다. 진행 상황을 오른쪽에서 확인하세요.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
+$("create-form").addEventListener("submit",async(e)=>{e.preventDefault();const b=$("create-button");b.disabled=true;try{const job=await api("/api/jobs",{method:"POST",body:JSON.stringify({topic:$("topic").value,notes:$("notes").value,script:$("script").value,tts_provider:$("tts-provider").value,voice:$("voice").value,speed:Number($("speed").value),background_queries:$("queries").value.split(",").map(s=>s.trim()).filter(Boolean)})});selected=job.id;notice("제작을 시작했습니다. 진행 상황을 오른쪽에서 확인하세요.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
 $("refresh-button").addEventListener("click",()=>refresh().catch(e=>notice(e.message,true)));
-$("trend-button").addEventListener("click",async()=>{const b=$("trend-button");b.disabled=true;b.textContent="트렌드 수집 중…";try{const data=await api("/api/trends");const panel=$("trends");panel.replaceChildren();panel.hidden=false;for(const topic of data.topics){const item=node("button",topic.title);item.type="button";item.addEventListener("click",()=>{$("topic").value=topic.title;$("notes").value=`출처: ${topic.url}\n확인한 핵심 사실: `;notice("자료의 핵심 사실을 채워주세요. 기사 제목만으로 대본을 작성하지 않습니다.");panel.hidden=true;$("notes").focus();});panel.append(item);}}catch(e){notice(e.message,true);}finally{b.disabled=false;b.textContent="트렌드 찾아보기 ↗";}});
-async function init(){try{config=await api("/api/config");csrf=config.csrf;const panel=$("connections");for(const [name,ready] of Object.entries(config.connections)){const el=node("div",name==="openai"?"OpenAI":name==="pexels"?"Pexels":name,"connection"+(ready?" ready":""));el.append(node("small",ready?"설정됨":"미설정"));panel.append(el);}$("voice").value=config.defaults.voice;$("speed").value=String(config.defaults.speed);await refresh();}catch(e){notice(e.message,true);}}
+let sourceRequest = 0;
+async function loadTrends(){
+  const b=$("trend-button");b.disabled=true;b.textContent="주제 수집 중…";
+  try{
+    const data=await api("/api/trends");const panel=$("trends");panel.replaceChildren();panel.hidden=false;
+    panel.append(node("p",`추천 주제 ${data.topics.length}개 · 선택하면 기사 자료를 불러옵니다.`));
+    data.topics.forEach((topic,index)=>{
+      const item=node("button",undefined,"trend-card");item.type="button";
+      item.append(node("strong",`${index+1}. ${topic.title}`),node("small",`${topic.source} · 반응 ${topic.score}`));
+      item.addEventListener("click",async()=>{
+        const requestId=++sourceRequest;
+        panel.querySelectorAll("button").forEach(el=>el.setAttribute("aria-pressed",String(el===item)));
+        $("topic").value=topic.title.slice(0,200);$("notes").value="";$("script").value="";
+        $("create-button").disabled=true;notice("선택한 기사의 본문을 불러오는 중입니다…");
+        try{
+          const data=await api("/api/source",{method:"POST",body:JSON.stringify({url:topic.url})});
+          if(requestId!==sourceRequest)return;
+          $("notes").value=data.notes;notice("자료를 불러왔습니다. 확인 후 ‘선택한 주제로 영상 제작’을 누르세요.");
+        }catch(e){if(requestId===sourceRequest){$("notes").value="";notice(`${e.message} 출처: ${topic.url} — 참고 자료에 핵심 사실을 직접 입력해주세요.`,true);}}
+        finally{if(requestId===sourceRequest)$("create-button").disabled=false;}
+      });
+      panel.append(item);
+    });
+  }catch(e){notice(e.message,true);}finally{b.disabled=false;b.textContent="추천 주제 10개 새로고침 ↻";}
+}
+$("trend-button").addEventListener("click",loadTrends);
+function updateVoice(){
+  const provider=$("tts-provider").value;
+  const eleven=provider==="elevenlabs"||(provider==="auto"&&config.connections.elevenlabs);
+  $("voice").disabled=eleven;
+  for(const option of $("speed").options)option.disabled=eleven&&(Number(option.value)<0.7||Number(option.value)>1.2);
+  if(eleven&&Number($("speed").value)>1.2)$("speed").value="1.1";
+}
+$("tts-provider").addEventListener("change",updateVoice);
+async function init(){try{config=await api("/api/config");csrf=config.csrf;const panel=$("connections");for(const [name,ready] of Object.entries(config.connections)){const el=node("div",name==="openai"?"OpenAI":name==="pexels"?"Pexels":name,"connection"+(ready?" ready":""));el.append(node("small",ready?"설정됨":"미설정"));panel.append(el);}$("voice").value=config.defaults.voice;$("speed").value=String(config.defaults.speed);$("tts-provider").value=config.defaults.tts_provider;updateVoice();await refresh();await loadTrends();}catch(e){notice(e.message,true);}}
 init();setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},4000);

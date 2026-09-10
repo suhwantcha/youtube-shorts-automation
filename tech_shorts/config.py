@@ -19,10 +19,13 @@ class Settings:
     script_model: str = "gpt-4o"
     tts_model: str = "gpt-4o-mini-tts"
     voice: str = "onyx"
-    speed: float = 1.25
+    speed: float = 1.1
     width: int = 1080
     height: int = 1920
-    fps: int = 24
+    fps: int = 30
+    tts_provider: str = "auto"
+    elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
+    elevenlabs_model: str = "eleven_multilingual_v2"
 
     @classmethod
     def load(cls):
@@ -38,7 +41,10 @@ class Settings:
             script_model=os.getenv("SCRIPT_MODEL", "gpt-4o"),
             tts_model=os.getenv("TTS_MODEL", "gpt-4o-mini-tts"),
             voice=os.getenv("TTS_VOICE", "onyx"),
-            speed=float(os.getenv("TTS_SPEED", "1.25")),
+            tts_provider=os.getenv("TTS_PROVIDER", "auto"),
+            elevenlabs_voice_id=os.getenv("ELEVENLABS_VOICE_ID") or "JBFqnCBsd6RMkjVDRZzb",
+            elevenlabs_model=os.getenv("ELEVENLABS_MODEL") or "eleven_multilingual_v2",
+            speed=float(os.getenv("TTS_SPEED", "1.1")),
         )
 
 

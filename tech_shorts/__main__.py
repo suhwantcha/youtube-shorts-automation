@@ -24,7 +24,7 @@ def main():
     run.add_argument("--subtitles", type=Path)
     run.add_argument("--subtitle-mode", choices=["whisper", "script"], default="whisper")
     run.add_argument("--voice", default="onyx")
-    run.add_argument("--speed", type=float, default=1.25)
+    run.add_argument("--speed", type=float, default=1.1)
     sub.add_parser("doctor", help="설정과 미디어 실행 환경 확인 (외부 API 호출 없음)")
     sub.add_parser("list", help="저장된 작업 목록")
     sub.add_parser("auto", help="트렌드 기사 한 건으로 자동 제작 (검토 대기까지만 진행)")

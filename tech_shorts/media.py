@@ -57,7 +57,7 @@ def korean_font():
     raise ValueError("한글 폰트가 없습니다. KOREAN_FONT에 폰트 파일 경로를 지정해주세요.")
 
 
-def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=24, max_duration=180):
+def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180):
     from tempfile import TemporaryDirectory
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -73,22 +73,25 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
         fonts = work / "fonts"
         fonts.mkdir()
         shutil.copyfile(korean_font(), fonts / korean_font().name)
-        section = duration / len(backgrounds)
+        scene_count = max(len(backgrounds), math.ceil(duration / 5))
+        section = duration / scene_count
         names = []
-        for index, background in enumerate(backgrounds):
+        for index in range(scene_count):
+            background = backgrounds[index % len(backgrounds)]
             name = f"scene_{index:03d}.mp4"
-            scale = f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height},setsar=1,fps={fps}"
+            scale = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height},setsar=1,fps={fps}"
             run(["-stream_loop", "-1", "-i", Path(background).resolve(), "-t", f"{section:.6f}",
-                 "-an", "-vf", scale, "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
+                 "-an", "-vf", scale, "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                  "-pix_fmt", "yuv420p", "-threads", "2", name], cwd=work)
             names.append(f"file '{name}'")
         (work / "concat.txt").write_text("\n".join(names), encoding="utf-8")
         style = "Fontname=Malgun Gothic" if os.name == "nt" else "Fontname=Noto Sans CJK KR"
-        style += ",Fontsize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101018,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=55,MarginL=20,MarginR=20"
+        style += ",Fontsize=20,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101018,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=65,MarginL=20,MarginR=20"
         run(["-f", "concat", "-safe", "0", "-i", "concat.txt", "-i", Path(audio_path).resolve(),
              "-vf", f"subtitles=captions.srt:fontsdir=fonts:force_style='{style}'",
              "-map", "0:v:0", "-map", "1:a:0", "-t", f"{duration:.6f}",
-             "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
+             "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000",
              "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-threads", "2", "final.mp4"], cwd=work)
         report = inspect(work / "final.mp4")
         if not report["has_audio"] or (report["width"], report["height"]) != (width, height):

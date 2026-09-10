@@ -21,6 +21,7 @@ def auth(client):
 
 def test_home_and_no_secret_exposure(app, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY","never-display-this-value")
+    monkeypatch.setenv("ELEVENLABS_API_KEY","never-display-this-value")
     client = app.test_client()
     assert client.get("/").status_code == 200
     assert b"never-display-this-value" not in client.get("/api/config").data
@@ -79,3 +80,19 @@ def test_bearer_auth_and_signed_review_get_does_not_approve(service):
     assert service.store.get(job["id"])["status"] == "pending_approval"
     assert client.get("/review?token=tampered").status_code == 403
     app.extensions["shorts_executor"].shutdown(wait=True)
+
+
+def test_topic_discovery_does_not_create_job(app, monkeypatch):
+    monkeypatch.setattr("tech_shorts.content.all_trends", lambda: [dict(title=str(i), url=f"https://example.com/{i}") for i in range(10)])
+    client = app.test_client()
+    assert len(client.get("/api/trends").json["topics"]) == 10
+    assert client.get("/api/jobs").json["jobs"] == []
+
+
+def test_selected_article_is_loaded(app, monkeypatch):
+    reader = Mock(return_value="선택한 기사의 사실")
+    monkeypatch.setattr("tech_shorts.sources.article_notes", reader)
+    client = app.test_client()
+    result = client.post("/api/source", json={"url": "https://example.com/chosen"}, headers=auth(client))
+    assert result.json["notes"] == "선택한 기사의 사실"
+    reader.assert_called_once_with("https://example.com/chosen")
