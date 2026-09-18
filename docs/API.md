@@ -66,7 +66,7 @@ Background music uses a locally synthesized instrumental with speech-driven duck
 
 ## Job Results
 
-Jobs stop at `pending_approval` after rendering. The `editorial` field contains the fact checklist, original source evidence, English names, and the model's script review. `scene_plan` contains speech-based scene times, search queries, and stock footage sources. `script_characters` records the narration's text length.
+Jobs stop at `pending_approval` after rendering. The `editorial` field contains the fact checklist, original source evidence, English names, and the model's script review. `scene_plan` contains speech-based scene times, search queries, stock footage sources, and thumbnail-based relevance reasons. Automatic footage selection requires an image-capable script model, excludes already selected clip IDs, and uses an AI-drafted, independently reviewed concept graphic if no suitable stock clip is found. Production stops if the graphic fails validation. Shots are at most 4.5 seconds. The editorial audit checks brief endings without repeated recaps and plain-language explanations of unfamiliar specialist terms. Rendered captions group short fragments into up to three lines while downloadable SRT timing remains unchanged. `script_characters` records the narration's text length.
 
 Artifact keys include `video`, `audio`, `subtitles`, `script`, `poster`, `manifest`, and cached `background_{index}` files. Add `?download=1` to an artifact URL to request a download.
 

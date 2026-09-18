@@ -147,7 +147,9 @@ class Pipeline:
                     key = f"background_{index}"
                     path = cached(key)
                     if path is None:
-                        found = content.search_backgrounds([query, *inputs["background_queries"]][:3], work / "backgrounds", count=1)[0]
+                        found = content.search_backgrounds([query], work / "backgrounds", count=1,
+                            settings=settings, narration=beat["text"],
+                            exclude_ids=[s["id"] for s in sources if "id" in s])[0]
                         path = work / f"{key}.mp4"
                         shutil.copyfile(found["path"], path)
                         save(key, path)

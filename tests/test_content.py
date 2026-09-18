@@ -65,3 +65,65 @@ def test_scene_queries_retry_missing_ids_and_preserve_order(monkeypatch):
     monkeypatch.setattr(editorial,"ask",api)
     assert content.plan_scene_queries([{"text":"one"},{"text":"two"}],Settings())==["laptop","server room"]
     assert api.call_count==2
+
+
+def test_visual_selection_excludes_used_clips_and_retries_rejected_images(monkeypatch, tmp_path):
+    from tech_shorts import editorial
+    monkeypatch.setenv("PEXELS_API_KEY", "test")
+    def video(i):
+        return {"id": i, "duration": 8, "image": f"https://example.com/{i}.jpg",
+                "video_files": [{"file_type": "video/mp4", "width": 1080, "height": 1920,
+                                 "link": f"https://example.com/{i}.mp4"}]}
+    response = Mock()
+    response.json.return_value = {"videos": [video(1), video(2)]}
+    get = Mock(return_value=response)
+    monkeypatch.setattr(content.requests, "get", get)
+    audit = Mock(side_effect=[{"id": None, "retry_query": "image editing screen"},
+                             {"id": 2, "reason": "Image editing interface"}])
+    monkeypatch.setattr(editorial, "ask", audit)
+    download = Mock(side_effect=lambda url, path: path.write_bytes(b"video"))
+    monkeypatch.setattr(content, "download", download)
+    monkeypatch.setattr(content, "inspect", lambda path: {})
+    result = content.search_backgrounds(["image converter"], tmp_path, count=1,
+        settings=Settings(), narration="이미지를 변환하는 도구", exclude_ids=[1])
+    assert result[0]["id"] == 2 and download.call_count == 1
+    assert audit.call_args_list[0].kwargs["images"] == [(2, "https://example.com/2.jpg")]
+    assert get.call_args_list[1].kwargs["params"]["query"] == "image editing screen"
+
+
+def test_unrelated_visuals_never_fall_back_to_generic_footage(monkeypatch, tmp_path):
+    from tech_shorts import editorial
+    monkeypatch.setenv("PEXELS_API_KEY", "test")
+    response = Mock()
+    response.json.return_value = {"videos": []}
+    get = Mock(return_value=response)
+    monkeypatch.setattr(content.requests, "get", get)
+    monkeypatch.setattr(editorial, "ask", Mock(return_value={"id": None}))
+    download = Mock()
+    monkeypatch.setattr(content, "download", download)
+    with pytest.raises(ValueError, match="배경 영상"):
+        content.search_backgrounds(["specific mechanism"], tmp_path, settings=Settings())
+    assert get.call_count == 1 and download.call_count == 0
+
+
+def test_empty_search_can_request_a_related_alternative(monkeypatch, tmp_path):
+    from tech_shorts import editorial
+    monkeypatch.setenv("PEXELS_API_KEY", "test")
+    empty = Mock()
+    empty.json.return_value = {"videos": []}
+    found = Mock()
+    found.json.return_value = {"videos": [{"id": 7, "duration": 5, "image": "https://example.com/7.jpg",
+        "video_files": [{"file_type": "video/mp4", "width": 1080, "height": 1920,
+                         "link": "https://example.com/7.mp4"}]}]}
+    get = Mock(side_effect=[empty, found])
+    monkeypatch.setattr(content.requests, "get", get)
+    audit = Mock(side_effect=[{"id": None, "retry_query": "software settings screen"},
+                             {"id": 7, "reason": "Software settings"}])
+    monkeypatch.setattr(editorial, "ask", audit)
+    monkeypatch.setattr(content, "download", lambda url, path: path.write_bytes(b"video"))
+    monkeypatch.setattr(content, "inspect", lambda path: {})
+    result = content.search_backgrounds(["specific software version"], tmp_path, count=1,
+        settings=Settings(), narration="설치된 소프트웨어 버전")
+    assert result[0]["id"] == 7
+    assert audit.call_args_list[0].kwargs["images"] == []
+    assert get.call_args_list[1].kwargs["params"]["query"] == "software settings screen"

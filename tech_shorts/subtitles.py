@@ -120,19 +120,26 @@ def read_srt(text):
 
 
 def scene_beats(srt, duration):
-    """Group timestamped phrases into sentence beats, bounded to about six seconds."""
+    """Group phrases by sentence, then bound each shot to 4.5 seconds."""
     cues = read_srt(srt)
     groups, texts, start = [], [], 0.0
     for i, cue in enumerate(cues):
         texts.append(cue["text"])
         end = min(duration, cues[i + 1]["start"] if i + 1 < len(cues) else duration)
-        if end > start and (cue["text"].endswith((".", "!", "?", "。")) or end - start >= 6 or i == len(cues)-1):
+        if end > start and (cue["text"].endswith((".", "!", "?", "。")) or end - start >= 4.5 or i == len(cues)-1):
             groups.append(dict(start=start, end=end, text=" ".join(texts)))
             start, texts = end, []
     if not groups:
         return [dict(start=0, end=duration, text=" ".join(c["text"] for c in cues))]
     groups[-1]["end"] = duration
-    return groups
+    shots = []
+    for group in groups:
+        count = math.ceil((group["end"] - group["start"]) / 4.5)
+        for i in range(count):
+            shots.append(dict(start=group["start"] + (group["end"]-group["start"])*i/count,
+                              end=group["start"] + (group["end"]-group["start"])*(i+1)/count,
+                              text=group["text"]))
+    return shots
 
 
 def to_ass(srt, font="Malgun Gothic", style="focus"):
@@ -160,10 +167,12 @@ Style: Default,{font},96,&H00FFFFFF,&H00FFFFFF,&H001A1714,&H90000000,-1,0,0,0,10
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = []
-    for cue in read_srt(srt):
+    for cue in display_cues(srt):
         # Reflow overlong imported cues rather than shrinking them into unreadable text.
         parts = chunks(cue["text"], limit=9)
-        pages = [parts[i:i+2] for i in range(0, len(parts), 2)]
+        page_count = math.ceil(len(parts) / 3)
+        pages = [parts[round(i*len(parts)/page_count):round((i+1)*len(parts)/page_count)]
+                 for i in range(page_count)]
         total = sum(len(" ".join(page)) for page in pages)
         cursor = cue["start"]
         for page in pages:
@@ -178,6 +187,31 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             events.append(f"Dialogue: 0,{ass_stamp(cursor)},{ass_stamp(end)},Default,,0,0,0,,{{\\fad({fade},{fade})}}{text}")
             cursor = end
     return header + "\n".join(events) + "\n"
+
+
+def display_cues(srt):
+    """Join recognition fragments into readable cards without shifting speech onset.
+
+    Keep the 96px font and allow up to three lines. Short fragments can share a
+    card; pauses over 350ms and long cards remain separate. SRT stays untouched.
+    """
+    result = []
+    for cue in read_srt(srt):
+        if result:
+            prior = result[-1]
+            joined = prior["text"] + " " + cue["text"]
+            if (0 <= cue["start"] - prior["end"] <= .35
+                    and cue["end"] - prior["start"] <= 4.5
+                    and len(chunks(joined, limit=9)) <= 3
+                    and (prior["end"] - prior["start"] < 1.8
+                         or not prior["text"].endswith((".", "?", "!")))):
+                prior.update(text=joined, end=cue["end"])
+                continue
+        result.append(dict(cue))
+    for i, cue in enumerate(result[:-1]):
+        # Hold through tiny recognition gaps, never across the next spoken card.
+        cue["end"] = min(result[i+1]["start"], cue["end"] + .2)
+    return result
 
 
 def align_script(srt, script):

@@ -64,3 +64,29 @@ def test_alignment_restores_technical_names_without_changing_audio_times():
     assert "".join(c["text"].replace(" ", "") for c in read_srt(result)) == "챗지피티계정입니다.깃허브같은외부서비스입니다."
     with pytest.raises(ValueError, match="일치도"):
         align_script(srt, "전혀 무관한 이야기만 여기에 적어놓습니다.")
+
+
+def test_short_fragments_share_a_readable_card_without_text_loss():
+    from tech_shorts.subtitles import display_cues, to_ass
+    source = to_srt([dict(start=0,end=.5,text="이미지를"),
+                     dict(start=.5,end=1,text="변환하는"),
+                     dict(start=1,end=2.5,text="도구입니다.")])
+    cards = display_cues(source)
+    assert len(cards) == 1 and cards[0]["end"] == 2.5
+    assert cards[0]["text"] == "이미지를 변환하는 도구입니다."
+    assert to_ass(source).count("Dialogue:") == 1
+
+
+def test_readable_cards_do_not_cross_long_pauses():
+    from tech_shorts.subtitles import display_cues
+    source = to_srt([dict(start=0,end=.5,text="시작."),dict(start=2,end=3,text="다음 설명.")])
+    cards = display_cues(source)
+    assert len(cards) == 2 and cards[0]["end"] < cards[1]["start"]
+
+
+def test_long_sentence_has_multiple_bounded_shots():
+    from tech_shorts.subtitles import scene_beats
+    beats = scene_beats(from_script("전문 용어를 설명합니다.", 13), 13)
+    assert len(beats) == 3
+    assert all(0 < b["end"]-b["start"] <= 4.5 for b in beats)
+    assert beats[0]["start"] == 0 and beats[-1]["end"] == 13
