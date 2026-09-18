@@ -96,3 +96,15 @@ def test_selected_article_is_loaded(app, monkeypatch):
     result = client.post("/api/source", json={"url": "https://example.com/chosen"}, headers=auth(client))
     assert result.json["notes"] == "선택한 기사의 사실"
     reader.assert_called_once_with("https://example.com/chosen")
+
+
+def test_draft_generates_script_without_creating_video_job(app, monkeypatch):
+    generate = Mock(return_value={"title":"초안","script":"검토할 대본입니다.","background_queries":["laptop"]})
+    monkeypatch.setattr("tech_shorts.content.generate_script", generate)
+    client = app.test_client()
+    response = client.post("/api/draft", json={"topic":"주제","notes":"참고 자료"}, headers=auth(client))
+    assert response.status_code == 200
+    assert response.json["script"] == "검토할 대본입니다."
+    assert client.get("/api/jobs").json["jobs"] == []
+    assert client.post("/api/draft",json={"topic":"제목만"},headers=auth(client)).status_code == 400
+    assert generate.call_count == 1

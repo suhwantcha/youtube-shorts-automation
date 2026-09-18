@@ -22,7 +22,7 @@ def create_app(settings=None, store=None):
     settings = settings or Settings.load()
     app = Flask(__name__)
     app.secret_key = settings.api_token or secrets.token_hex(32)
-    app.config.update(MAX_CONTENT_LENGTH=100_000, SESSION_COOKIE_HTTPONLY=True,
+    app.config.update(MAX_CONTENT_LENGTH=400_000, SESSION_COOKIE_HTTPONLY=True,
                       SESSION_COOKIE_SAMESITE="Strict", SESSION_COOKIE_SECURE=settings.base_url.startswith("https://"))
     service = Service(settings, store or make_store(settings))
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="shorts-worker")
@@ -139,6 +139,12 @@ def create_app(settings=None, store=None):
         if not isinstance(url, str) or len(url) > 2000:
             raise ValueError("기사 URL을 입력해주세요.")
         return jsonify(notes=article_notes(url))
+
+    @app.post("/api/draft")
+    def draft():
+        from .pipeline import validate_inputs
+        inputs = validate_inputs(body())
+        return jsonify(content.generate_script(inputs["topic"], inputs["notes"], settings))
 
     @app.post("/api/jobs/auto")
     def auto_job():

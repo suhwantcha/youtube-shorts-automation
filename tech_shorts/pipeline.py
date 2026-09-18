@@ -14,7 +14,7 @@ def validate_inputs(data, allow_local=False):
     if not isinstance(data, dict):
         raise ValueError("JSON 객체가 필요합니다.")
     result = {}
-    limits = {"topic": 200, "notes": 12000, "script": 3000}
+    limits = {"topic": 200, "notes": 75000, "script": 3000}
     for key, limit in limits.items():
         value = data.get(key, "")
         if not isinstance(value, str) or len(value) > limit:
@@ -29,7 +29,7 @@ def validate_inputs(data, allow_local=False):
     if result["voice"] not in {"onyx", "nova", "coral", "alloy", "ash", "sage", "shimmer", "marin", "cedar"}:
         raise ValueError("지원하지 않는 음성입니다.")
     try:
-        result["speed"] = float(data.get("speed", 1.1))
+        result["speed"] = float(data.get("speed", 1.2))
     except (TypeError, ValueError):
         raise ValueError("음성 속도는 숫자여야 합니다.")
     if not 0.5 <= result["speed"] <= 2:
@@ -37,6 +37,12 @@ def validate_inputs(data, allow_local=False):
     queries = data.get("background_queries", [])
     if not isinstance(queries, list) or len(queries) > 5 or any(not isinstance(q, str) or not q.strip() or len(q) > 80 for q in queries):
         raise ValueError("배경 검색어는 80자 이하 문자열로 최대 5개까지 지정해주세요.")
+    result["bgm"] = data.get("bgm", True)
+    if not isinstance(result["bgm"], bool):
+        raise ValueError("배경음악 설정은 true 또는 false여야 합니다.")
+    result["subtitle_style"] = data.get("subtitle_style", "focus")
+    if result["subtitle_style"] not in {"focus", "minimal"}:
+        raise ValueError("자막 스타일은 focus 또는 minimal입니다.")
     result["background_queries"] = queries
     if allow_local:
         for key in ("audio_path", "background_paths", "subtitle_path"):
@@ -75,6 +81,8 @@ class Pipeline:
                     return None
             return None
 
+        editorial = job.get("editorial")
+
         try:
             if job.get("script"):
                 script = job["script"]
@@ -85,7 +93,8 @@ class Pipeline:
             else:
                 generated = content.generate_script(inputs["topic"], inputs["notes"], settings)
                 script, queries = generated["script"], inputs["background_queries"] or generated["background_queries"]
-                self.store.update(job_id, {"title": generated["title"]})
+                editorial = generated
+                self.store.update(job_id, {"title": generated["title"], "editorial": editorial})
             self.store.update(job_id, {"script": script, "background_queries": queries})
             (work / "script.txt").write_text(script, encoding="utf-8")
             save("script", work / "script.txt")
@@ -101,9 +110,8 @@ class Pipeline:
                     content.generate_audio(script, audio, settings)
                 save("audio", audio)
             duration = media.inspect(audio)["duration"]
-            self.store.update(job_id, {"duration": duration})
-            if duration > 180:
-                raise ValueError("음성이 180초를 초과합니다. 대본을 줄여 새 작업으로 제작해주세요.")
+            # Duration is metadata for subtitles/muxing, never a reason to regenerate paid audio.
+            self.store.update(job_id, {"duration": duration, "script_characters": len(script)})
 
             self.store.update(job_id, {"stage": "자막 생성"})
             srt = cached("subtitles")
@@ -114,29 +122,56 @@ class Pipeline:
                 elif inputs["subtitle_mode"] == "script":
                     srt.write_text(subtitles.from_script(script, duration), encoding="utf-8")
                 else:
-                    content.generate_subtitles(audio, srt)
+                    content.generate_subtitles(audio, srt, script=script)
                 save("subtitles", srt)
             self.store.update(job_id, {"subtitle_mode": inputs["subtitle_mode"]})
 
-            self.store.update(job_id, {"stage": "배경 영상 준비"})
+            job = self.store.get(job_id)
+            self.store.update(job_id, {"stage": "문장별 장면 구성"})
             backgrounds = inputs.get("background_paths")
-            sources = []
+            sources, beats, scene_durations = [], [], None
             if backgrounds:
                 backgrounds = [str(Path(p).resolve()) for p in backgrounds]
                 for path in backgrounds:
                     media.inspect(path)
             else:
-                sources = content.search_backgrounds(queries, work / "backgrounds")
-                backgrounds = [s["path"] for s in sources]
-            self.store.update(job_id, {"sources": [{k: v for k, v in s.items() if k != "path"} for s in sources]})
+                beats = subtitles.scene_beats(srt.read_text(encoding="utf-8-sig"), duration)
+                # Keep paid planning and downloaded clips across render retries.
+                scene_queries = job.get("scene_queries")
+                if not scene_queries or len(scene_queries) != len(beats):
+                    scene_queries = content.plan_scene_queries(beats, settings)
+                    self.store.update(job_id, {"scene_queries": scene_queries})
+                backgrounds = []
+                for index, (beat, query) in enumerate(zip(beats, scene_queries)):
+                    self.store.update(job_id, {"stage": f"장면 영상 준비 {index+1}/{len(beats)}"})
+                    key = f"background_{index}"
+                    path = cached(key)
+                    if path is None:
+                        found = content.search_backgrounds([query, *inputs["background_queries"]][:3], work / "backgrounds", count=1)[0]
+                        path = work / f"{key}.mp4"
+                        shutil.copyfile(found["path"], path)
+                        save(key, path)
+                        beat["source"] = {k: v for k, v in found.items() if k != "path"}
+                    elif index < len(job.get("scene_plan", [])):
+                        beat["source"] = job["scene_plan"][index].get("source", {})
+                    beat["query"] = query
+                    backgrounds.append(str(path))
+                    sources.append(beat.get("source", {}))
+                    self.store.update(job_id, {"scene_plan": beats})
+                scene_durations = [beat["end"] - beat["start"] for beat in beats]
+            self.store.update(job_id, {"sources": sources})
             self.store.update(job_id, {"stage": "영상 렌더링"})
             video = work / "video.mp4"
-            report = media.render(audio, backgrounds, srt, video, width=settings.width, height=settings.height, fps=settings.fps)
+            report = media.render(audio, backgrounds, srt, video, width=settings.width, height=settings.height, fps=settings.fps, scene_durations=scene_durations,
+                                  subtitle_style=inputs.get("subtitle_style", "focus"),
+                                  bgm=inputs.get("bgm", True), bgm_path=settings.bgm_path)
             save("video", video)
             media.thumbnail(video, work / "poster.jpg")
             save("poster", work / "poster.jpg")
             (work / "manifest.json").write_text(json.dumps({"job_id": job_id, "script": script,
                 "sources": [{k: v for k, v in s.items() if k != "path"} for s in sources], "quality": report,
+                "background_music": report.get("background_music", "off"), "narration_speed": settings.speed,
+                "editorial": editorial, "scene_plan": beats, "subtitle_style": inputs.get("subtitle_style", "focus"),
                 "ai_voice": not bool(inputs.get("audio_path")), "subtitle_mode": inputs["subtitle_mode"],
                 "topic": inputs["topic"], "source_notes": inputs["notes"]},
                 ensure_ascii=False, indent=2), encoding="utf-8")

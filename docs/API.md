@@ -1,40 +1,92 @@
 # Studio API
 
-기본 주소: `http://127.0.0.1:8080`. 자동화 클라이언트는 `Authorization: Bearer <SHORTS_API_TOKEN>` 헤더를 사용합니다. 브라우저는 로그인 세션과 `/api/config`의 `csrf` 값을 `X-CSRF-Token`으로 사용합니다.
+Base URL: `http://127.0.0.1:8080`.
 
-| Method | 경로 | 동작 |
-|---|---|---|
-| GET | `/health` | 버전·프로세스 상태 |
-| GET | `/api/config` | 키 값 없이 설정 여부, CSRF 토큰 |
-| GET | `/api/trends` | Hacker News 및 설정된 Reddit 트렌드 |
-| POST | `/api/source` | `{ "url": "https://…" }` 기사 본문 추출 |
-| GET | `/api/jobs` | 최근 작업 100개 |
-| POST | `/api/jobs` | 새 제작 작업 시작 |
-| POST | `/api/jobs/auto` | 오늘의 기사 자동 선정·제작 (검토 대기까지만) |
-| GET | `/api/jobs/{id}` | 진행 상태, 오류, 결과 |
-| POST | `/api/jobs/{id}/retry` | 제작 실패·중단 작업 재시도 |
-| POST | `/api/jobs/{id}/review` | `{ "action": "approve" }` 또는 `reject` |
-| POST | `/api/jobs/{id}/publish` | 승인 영상의 실제 플랫폼 업로드 |
-| POST | `/api/jobs/{id}/refresh-uploads` | 게시 상태 확인·준비된 Instagram 컨테이너 게시 |
-| POST | `/api/jobs/{id}/email` | Gmail 검토 메일 발송 |
-| GET | `/api/jobs/{id}/artifacts/{key}` | video, audio, subtitles, script, poster, manifest |
+Automation clients authenticate with `Authorization: Bearer <SHORTS_API_TOKEN>`. Browser clients use a login session and send the `/api/config` response's `csrf` value in the `X-CSRF-Token` header for state-changing requests.
 
-제작 입력:
+## Endpoints
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Application version and process health |
+| GET | `/api/config` | Connection flags, defaults, and CSRF token; no credentials |
+| GET | `/api/trends` | Up to ten deduplicated Hacker News and configured Reddit topics |
+| POST | `/api/source` | Extract article text from `{ "url": "https://..." }` |
+| POST | `/api/draft` | Generate and review a draft from `topic` and `notes`; no narration or video |
+| GET | `/api/jobs` | List recent jobs |
+| POST | `/api/jobs` | Create and dispatch a video production job |
+| POST | `/api/jobs/auto` | Select a readable trending article and produce a video for review |
+| GET | `/api/jobs/{id}` | Job status, errors, editorial review, and artifacts |
+| POST | `/api/jobs/{id}/retry` | Retry a failed or interrupted production job |
+| POST | `/api/jobs/{id}/review` | Approve or reject with `{ "action": "approve" }` or `reject` |
+| POST | `/api/jobs/{id}/publish` | Publish an approved video to selected platforms |
+| POST | `/api/jobs/{id}/refresh-uploads` | Check platform processing and publishing status |
+| POST | `/api/jobs/{id}/reconcile` | Record a manually verified uncertain upload outcome |
+| POST | `/api/jobs/{id}/email` | Send a Gmail review request |
+| GET | `/api/jobs/{id}/artifacts/{key}` | Retrieve a stored artifact |
+| GET | `/api/tiktok/creator` | Retrieve the connected TikTok creator and allowed privacy choices |
+
+## Production Input
 
 ```json
-{"topic":"패스키의 원리","notes":"확인한 사실과 출처…","voice":"onyx","speed":1.25,"background_queries":["typing laptop"]}
+{
+  "topic": "How passkeys protect an account",
+  "notes": "Verified facts and source URLs...",
+  "tts_provider": "auto",
+  "voice": "onyx",
+  "speed": 1.2,
+  "subtitle_style": "focus",
+  "subtitle_mode": "whisper",
+  "bgm": true,
+  "background_queries": []
+}
 ```
 
-`script`가 있으면 대본 생성을 건너뜁니다. `subtitle_mode=script`는 글자 수 기준 추정 자막, 기본값 `whisper`는 음성 인식입니다. HTTP에서는 서버 로컬 경로를 받지 않으며 로컬 파일 입력은 CLI를 사용합니다.
+The narration is written in Korean. English proper nouns retain their source spelling.
 
-게시 입력:
+Omit `script` to use automatic editorial production. The application extracts source-supported facts and English names, writes a draft, and checks coverage, unsupported claims, audience questions, and the ending. Editorial review can request up to three draft attempts before production stops with an error.
+
+Supply `script` to use your own narration without automatic rewriting. Topic and notes are optional when a script is supplied. HTTP clients cannot provide server-local media paths; local media inputs are available through the CLI.
+
+| Field | Values and limits |
+| --- | --- |
+| `topic` | Up to 200 characters |
+| `notes` | Up to 75,000 characters; article extraction supplies up to 24,000 per source |
+| `script` | Up to 3,000 characters for manually supplied narration |
+| `tts_provider` | `auto`, `elevenlabs`, or `openai` |
+| `speed` | 0.5-2.0 input range; ElevenLabs requires 0.7-1.2 |
+| `subtitle_style` | `focus` for mint accents or `minimal` for white text |
+| `subtitle_mode` | `whisper` for recognition timing or `script` for estimated timing |
+| `bgm` | Boolean; defaults to `true` |
+| `background_queries` | Up to five additional English search terms, each at most 80 characters |
+
+Automatic script length is checked by character count: 550-900 characters are recommended, with a validation range of 400-1,400 to preserve material facts. Narration duration does not trigger paid script or voice regeneration. The renderer has a 180-second technical limit.
+
+Background music uses a locally synthesized instrumental with speech-driven ducking. Set server-side `BGM_PATH` for a custom audio file, or send `bgm: false` for narration only.
+
+## Job Results
+
+Jobs stop at `pending_approval` after rendering. The `editorial` field contains the fact checklist, original source evidence, English names, and the model's script review. `scene_plan` contains speech-based scene times, search queries, and stock footage sources. `script_characters` records the narration's text length.
+
+Artifact keys include `video`, `audio`, `subtitles`, `script`, `poster`, `manifest`, and cached `background_{index}` files. Add `?download=1` to an artifact URL to request a download.
+
+## Publishing
 
 ```json
-{"platforms":["youtube"],"title":"제목 #Shorts","description":"설명 · AI 음성 사용","youtube_privacy":"private"}
+{
+  "platforms": ["youtube"],
+  "title": "Video title #Shorts",
+  "description": "Description and AI narration disclosure",
+  "youtube_privacy": "private"
+}
 ```
 
-TikTok은 `/api/tiktok/creator`의 계정과 허용 범위를 조회한 후 `tiktok_privacy`를 명시해야 합니다. Instagram은 공개 게시이며 GCS의 임시 서명 URL을 사용합니다.
+Publishing requires an approved job and configured platform credentials. For TikTok, retrieve `/api/tiktok/creator` and select an allowed `tiktok_privacy` value. Instagram publishing uses a signed GCS media URL and a configured professional account.
 
-응답: 202 작업 접수, 400 입력 오류, 401 인증 필요, 403 접근/CSRF 거부, 404 작업 없음, 409 상태 충돌, 500 처리 실패.
+Successful uploads are not repeated. Uncertain uploads require status checking or explicit reconciliation before another attempt.
 
-서명된 검토 링크는 48시간 유효합니다. GET은 화면만 보여주며 승인·거부는 CSRF 토큰이 있는 POST로 처리합니다. 거부는 파일을 삭제하지 않습니다.
+## Responses and Review Links
+
+Common statuses: `202` accepted, `400` invalid input, `401` authentication required, `403` access or CSRF rejected, `404` missing job or artifact, `409` state conflict, and `500` processing failure.
+
+Signed review links expire after 48 hours. A GET request displays the review page; approval and rejection require a CSRF-protected POST. Rejection does not delete the artifacts.

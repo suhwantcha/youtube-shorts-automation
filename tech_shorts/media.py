@@ -57,7 +57,7 @@ def korean_font():
     raise ValueError("한글 폰트가 없습니다. KOREAN_FONT에 폰트 파일 경로를 지정해주세요.")
 
 
-def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180):
+def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180, scene_durations=None, subtitle_style="focus", bgm=True, bgm_path=""):
     from tempfile import TemporaryDirectory
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,31 +69,54 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
     # Keep filter references relative: Windows drive colons and spaces never enter libass syntax.
     with TemporaryDirectory(prefix="render_", dir=output_path.parent) as temp:
         work = Path(temp)
-        shutil.copyfile(srt_path, work / "captions.srt")
+        from .subtitles import to_ass
+        narration = Path(audio_path).resolve()
+        if bgm:
+            from . import music
+            if bgm_path:
+                bed = Path(bgm_path).expanduser().resolve()
+                if not inspect(bed)["has_audio"]:
+                    raise ValueError("배경음악 파일에 오디오가 없습니다.")
+            else:
+                bed = work / "music.wav"
+                music.synthesize(bed)
+            narration = work / "mix.wav"
+            music.mix(audio_path, bed, narration, duration)
+        font_name = "Malgun Gothic" if os.name == "nt" else "Noto Sans CJK KR"
+        (work / "captions.ass").write_text(to_ass(Path(srt_path).read_text(encoding="utf-8-sig"), font_name, subtitle_style), encoding="utf-8")
         fonts = work / "fonts"
         fonts.mkdir()
         shutil.copyfile(korean_font(), fonts / korean_font().name)
-        scene_count = max(len(backgrounds), math.ceil(duration / 5))
-        section = duration / scene_count
+        if scene_durations is None:
+            scene_count = max(len(backgrounds), math.ceil(duration / 5))
+            sections = [duration / scene_count] * scene_count
+        else:
+            sections = scene_durations
+            if len(sections) != len(backgrounds) or any(not math.isfinite(t) or t <= 0 for t in sections) or abs(sum(sections)-duration) > .1:
+                raise ValueError("장면 길이가 음성 길이와 일치하지 않습니다.")
+        frame_cursor, time_cursor = 0, 0.0
         names = []
-        for index in range(scene_count):
+        for index, section in enumerate(sections):
             background = backgrounds[index % len(backgrounds)]
             name = f"scene_{index:03d}.mp4"
             scale = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height},setsar=1,fps={fps}"
-            run(["-stream_loop", "-1", "-i", Path(background).resolve(), "-t", f"{section:.6f}",
+            time_cursor += section
+            frame_end = round(time_cursor * fps)
+            frames = max(1, frame_end - frame_cursor)
+            frame_cursor = frame_end
+            run(["-stream_loop", "-1", "-i", Path(background).resolve(), "-frames:v", str(frames),
                  "-an", "-vf", scale, "-c:v", "libx264", "-preset", "fast", "-crf", "18",
                  "-pix_fmt", "yuv420p", "-threads", "2", name], cwd=work)
             names.append(f"file '{name}'")
         (work / "concat.txt").write_text("\n".join(names), encoding="utf-8")
-        style = "Fontname=Malgun Gothic" if os.name == "nt" else "Fontname=Noto Sans CJK KR"
-        style += ",Fontsize=20,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00101018,BorderStyle=1,Outline=2,Shadow=0,Alignment=2,MarginV=65,MarginL=20,MarginR=20"
-        run(["-f", "concat", "-safe", "0", "-i", "concat.txt", "-i", Path(audio_path).resolve(),
-             "-vf", f"subtitles=captions.srt:fontsdir=fonts:force_style='{style}'",
+        run(["-f", "concat", "-safe", "0", "-i", "concat.txt", "-i", narration,
+             "-vf", "ass=captions.ass:fontsdir=fonts",
              "-map", "0:v:0", "-map", "1:a:0", "-t", f"{duration:.6f}",
              "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
-             "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000",
+             "-af", "anull" if bgm else "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000",
              "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-threads", "2", "final.mp4"], cwd=work)
         report = inspect(work / "final.mp4")
+        report["background_music"] = ("custom" if bgm_path else "synthesized") if bgm else "off"
         if not report["has_audio"] or (report["width"], report["height"]) != (width, height):
             raise RuntimeError("완성 영상의 오디오 또는 해상도 검증에 실패했습니다.")
         if abs(report["duration"] - duration) > 0.5:

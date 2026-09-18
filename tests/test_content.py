@@ -56,3 +56,12 @@ def test_elevenlabs_rejects_unsupported_speed(monkeypatch, tmp_path):
     monkeypatch.setenv("ELEVENLABS_API_KEY", "test")
     with pytest.raises(ValueError, match="0.7~1.2"):
         content.generate_audio("테스트", tmp_path / "audio.mp3", Settings(speed=1.5))
+
+
+def test_scene_queries_retry_missing_ids_and_preserve_order(monkeypatch):
+    from tech_shorts import editorial
+    api=Mock(side_effect=[{"queries":[{"id":0,"query":"laptop"}]},
+        {"queries":[{"id":1,"query":"server room"},{"id":0,"query":"laptop"}]}])
+    monkeypatch.setattr(editorial,"ask",api)
+    assert content.plan_scene_queries([{"text":"one"},{"text":"two"}],Settings())==["laptop","server room"]
+    assert api.call_count==2

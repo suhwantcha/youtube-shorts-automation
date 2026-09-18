@@ -67,7 +67,7 @@ def article_notes(url):
             parser = ArticleText()
             parser.feed(bytes(data[:1_000_000]).decode(response.encoding or "utf-8", errors="replace"))
             lines = [line.strip() for line in "".join(parser.parts).splitlines() if line.strip()]
-            text = "\n".join(lines)[:10000]
+            text = "\n".join(lines)[:24000]
             if len(text) < 150:
                 raise ValueError("기사 본문이 충분하지 않습니다. 핵심 사실을 직접 입력해주세요.")
             return f"출처: {current}\n기사 본문 (검토 전 자동 추출):\n{text}"
