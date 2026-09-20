@@ -6,7 +6,8 @@ from tech_shorts.store import SQLiteStore
 
 
 @pytest.fixture
-def service(tmp_path):
+def service(tmp_path, monkeypatch):
+    monkeypatch.setattr("tech_shorts.presentation.suggest_titles", lambda *a: ["원인을 살펴보는 이야기", "변화를 이해하는 새로운 관점", "핵심 사실로 알아보는 오늘"])
     settings = Settings(output=tmp_path / "jobs", width=360, height=640)
     return Service(settings, SQLiteStore(tmp_path / "jobs.sqlite3"))
 

@@ -62,6 +62,23 @@ def test_unapproved_publish_is_denied(app):
     assert result.status_code == 409
 
 
+def test_presentation_requires_completed_video_and_dispatches_without_publishing(app, monkeypatch):
+    client = app.test_client()
+    service = app.extensions["shorts_service"]
+    job = service.create({"script": "test"})
+    headers = auth(client)
+    path = f"/api/jobs/{job['id']}/presentation"
+    assert client.post(path, headers=headers).status_code == 409
+    service.store.update(job["id"], {"status": "approved", "artifacts": {"video": {"name": "video.mp4"}}})
+    prepare = Mock()
+    publish = Mock()
+    monkeypatch.setattr(service, "prepare_presentation", prepare)
+    monkeypatch.setattr(service, "publish", publish)
+    assert client.post(path, headers=headers).status_code == 202
+    prepare.assert_called_once_with(job["id"])
+    publish.assert_not_called()
+
+
 def test_artifact_path_traversal_denied(app):
     client=app.test_client()
     assert client.get("/api/jobs/not-valid/artifacts/video").status_code == 400
@@ -89,6 +106,17 @@ def test_topic_discovery_does_not_create_job(app, monkeypatch):
     assert client.get("/api/jobs").json["jobs"] == []
 
 
+def test_category_discovery_and_invalid_category(app, monkeypatch):
+    discover = Mock(return_value=[dict(title="축구 소식", url="https://example.com/soccer")])
+    monkeypatch.setattr("tech_shorts.content.all_trends", discover)
+    client = app.test_client()
+    assert len(client.get("/api/config").json["categories"]) == 17
+    result = client.get("/api/trends?category=science")
+    assert result.status_code == 200 and result.json["category"] == "science"
+    discover.assert_called_once_with(category="science")
+    assert client.get("/api/trends?category=bad").status_code == 400
+
+
 def test_selected_article_is_loaded(app, monkeypatch):
     reader = Mock(return_value="선택한 기사의 사실")
     monkeypatch.setattr("tech_shorts.sources.article_notes", reader)
@@ -108,3 +136,37 @@ def test_draft_generates_script_without_creating_video_job(app, monkeypatch):
     assert client.get("/api/jobs").json["jobs"] == []
     assert client.post("/api/draft",json={"topic":"제목만"},headers=auth(client)).status_code == 400
     assert generate.call_count == 1
+
+
+def test_one_click_auto_produces_video_and_reuses_daily_job(app, monkeypatch, tmp_path):
+    from pathlib import Path
+    from tech_shorts import content, media, subtitles
+    audio, background = tmp_path / "voice.wav", tmp_path / "scene.mp4"
+    media.run(["-f", "lavfi", "-i", "sine=frequency=220:duration=3", audio])
+    media.run(["-f", "lavfi", "-i", "color=c=0x153647:s=360x640:d=1", "-c:v", "libx264", background])
+    monkeypatch.setattr(content, "all_trends", lambda: [{"title": "자동 테스트", "url": "https://example.com/story"}])
+    reader = Mock(return_value="출처가 뒷받침하는 참고 자료입니다.")
+    monkeypatch.setattr("tech_shorts.sources.article_notes", reader)
+    writer = Mock(return_value={"title": "자동 영상", "script": "원인을 살펴봅니다. 해결 방법을 설명합니다.",
+                               "background_queries": ["device"], "music_mood": "tense"})
+    monkeypatch.setattr(content, "generate_script", writer)
+    def voice(script, path, settings):
+        media.run(["-i", audio, path])
+    monkeypatch.setattr(content, "generate_audio", voice)
+    monkeypatch.setattr(content, "generate_subtitles", lambda audio, path, script: Path(path).write_text(subtitles.from_script(script, 3), encoding="utf-8"))
+    monkeypatch.setattr(content, "plan_scene_queries", lambda beats, settings: ["device"] * len(beats))
+    monkeypatch.setattr(content, "search_backgrounds", lambda *a, **k: [{"path": str(background), "id": 123}])
+    client = app.test_client()
+    assert 'id="auto-create-button"' in client.get("/").text
+    response = client.post("/api/jobs/auto", json={"subtitle_style": "minimal", "speed": 1.1}, headers=auth(client))
+    assert response.status_code == 202
+    job = client.get(f"/api/jobs/{response.json['id']}").json
+    assert job["status"] == "pending_approval"
+    assert job["inputs"]["subtitle_style"] == "minimal" and job["inputs"]["speed"] == 1.1
+    assert job["quality"]["music_mood"] == "tense"
+    assert job["quality"]["captions"]["cards"] > 0
+    assert client.get(f"/api/jobs/{job['id']}/artifacts/video").status_code == 200
+    again = client.post("/api/jobs/auto", json={}, headers=auth(client))
+    assert again.json["id"] == job["id"]
+    assert writer.call_count == reader.call_count == 1
+    assert job["uploads"] == {}

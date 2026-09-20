@@ -9,10 +9,11 @@ Automation clients authenticate with `Authorization: Bearer <SHORTS_API_TOKEN>`.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Application version and process health |
-| GET | `/api/config` | Connection flags, defaults, and CSRF token; no credentials |
-| GET | `/api/trends` | Up to ten deduplicated Hacker News and configured Reddit topics |
+| GET | `/api/config` | Connection flags, defaults, 17-field category catalog, and CSRF token; no credentials |
+| GET | `/api/trends?category=science` | Up to ten recent news or popular community articles for the selected field |
 | POST | `/api/source` | Extract article text from `{ "url": "https://..." }` |
 | POST | `/api/draft` | Generate and review a draft from `topic` and `notes`; no narration or video |
+| POST | `/api/jobs/<id>/presentation` | Prepare three title suggestions and a portrait thumbnail for an existing video; no video regeneration or publication |
 | GET | `/api/jobs` | List recent jobs |
 | POST | `/api/jobs` | Create and dispatch a video production job |
 | POST | `/api/jobs/auto` | Select a readable trending article and produce a video for review |
@@ -30,6 +31,7 @@ Automation clients authenticate with `Authorization: Bearer <SHORTS_API_TOKEN>`.
 
 ```json
 {
+  "category": "it",
   "topic": "How passkeys protect an account",
   "notes": "Verified facts and source URLs...",
   "tts_provider": "auto",
@@ -50,6 +52,7 @@ Supply `script` to use your own narration without automatic rewriting. Topic and
 
 | Field | Values and limits |
 | --- | --- |
+| `category` | An ID from `/api/config.categories`; defaults to `it` |
 | `topic` | Up to 200 characters |
 | `notes` | Up to 75,000 characters; article extraction supplies up to 24,000 per source |
 | `script` | Up to 3,000 characters for manually supplied narration |
@@ -64,9 +67,11 @@ Automatic script length is checked by character count: 550-900 characters are re
 
 Background music uses a locally synthesized instrumental with speech-driven ducking. Set server-side `BGM_PATH` for a custom audio file, or send `bgm: false` for narration only.
 
+`POST /api/jobs/auto` accepts optional `category`, `voice`, `speed`, `tts_provider`, `bgm`, and `subtitle_style` settings. It selects an accessible trending article, then dispatches the same production pipeline as manual topic selection. One automatic job is reused per field per Asia/Seoul calendar day; repeated requests return that job without changing its original settings or regenerating completed work. Failed jobs can use the retry endpoint.
+
 ## Job Results
 
-Jobs stop at `pending_approval` after rendering. The `editorial` field contains the fact checklist, original source evidence, English names, and the model's script review. `scene_plan` contains speech-based scene times, search queries, stock footage sources, and thumbnail-based relevance reasons. Automatic footage selection requires an image-capable script model, excludes already selected clip IDs, and uses an AI-drafted, independently reviewed concept graphic if no suitable stock clip is found. Production stops if the graphic fails validation. Shots are at most 4.5 seconds. The editorial audit checks brief endings without repeated recaps and plain-language explanations of unfamiliar specialist terms. Rendered captions group short fragments into up to three lines while downloadable SRT timing remains unchanged. `script_characters` records the narration's text length.
+Jobs stop at `pending_approval` after rendering. The `editorial` field contains the fact checklist, original source evidence, English names, and the model's script review. `scene_plan` contains speech-based scene times, search queries, stock footage sources, and thumbnail-based relevance reasons. Automatic footage selection requires an image-capable script model, excludes already selected clip IDs, and uses an AI-drafted, independently reviewed concept graphic if no suitable stock clip is found. Production stops if the graphic fails validation. Shots are at most 4.5 seconds. The editorial audit also checks natural narrative order, immediate answers to middle questions, jargon density, and number/cost scope. `quality.captions` records display-card count, sub-second count and minimum duration; within-phrase display timing is estimated by character weight, while SRT timestamps remain intact. `quality.music_mood` records the selected synthesis mood (only used for synthesized BGM). The editorial audit checks brief endings without repeated recaps and plain-language explanations of unfamiliar specialist terms. Rendered captions group short fragments into up to three lines while downloadable SRT timing remains unchanged. `script_characters` records the narration's text length.
 
 Artifact keys include `video`, `audio`, `subtitles`, `script`, `poster`, `manifest`, and cached `background_{index}` files. Add `?download=1` to an artifact URL to request a download.
 
@@ -90,3 +95,13 @@ Successful uploads are not repeated. Uncertain uploads require status checking o
 Common statuses: `202` accepted, `400` invalid input, `401` authentication required, `403` access or CSRF rejected, `404` missing job or artifact, `409` state conflict, and `500` processing failure.
 
 Signed review links expire after 48 hours. A GET request displays the review page; approval and rejection require a CSRF-protected POST. Rejection does not delete the artifacts.
+
+Discovery items expose `category`, `source`, and `ranking_basis`. News also includes `published_at` and `provider`; only community results expose a numeric `score`. RSS search order is not a view-count ranking. Empty or unavailable sources never produce invented recommendations. Changing fields in the Studio clears selected article text and the previous draft, and stale in-flight responses are ignored.
+
+News searches use English keywords and the en-US market for both relevance and newest-result requests. Sports and gaming are not selectable categories.
+
+## Publishing assets
+
+New productions prepare assets before entering review. Existing jobs can call `POST /api/jobs/<id>/presentation` and poll the job for `presentation_status` (`running`, `ready`, or `failed`), `presentation_error`, `title_suggestions` and `thumbnail_title`. The response is `202`; completion is asynchronous. Successful titles and images are reused on repeated calls. The `thumbnail` artifact is a 1080 x 1920 JPEG available through the existing artifact endpoint. Posting-title edits do not alter the cover text. Asset failure leaves video state intact.
+
+YouTube attempts thumbnail application after checkpointing successful video upload. Results include `thumbnail_status` (`uploaded` or `failed`) and a separate `warning` if necessary. No thumbnail application is performed for TikTok or Instagram.

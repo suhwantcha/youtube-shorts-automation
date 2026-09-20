@@ -90,3 +90,15 @@ def test_long_sentence_has_multiple_bounded_shots():
     assert len(beats) == 3
     assert all(0 < b["end"]-b["start"] <= 4.5 for b in beats)
     assert beats[0]["start"] == 0 and beats[-1]["end"] == 13
+
+
+def test_reflow_does_not_strand_short_tail_or_lose_words():
+    from tech_shorts.subtitles import display_cues
+    source = to_srt([dict(start=0, end=2.5, text="하나둘셋넷 다섯여섯 일곱여덟 아홉열개"),
+                     dict(start=2.5, end=2.7, text="직원들의"),
+                     dict(start=2.7, end=5, text="계정을 안전하게 보호합니다.")])
+    cards = display_cues(source)
+    assert all(c["end"]-c["start"] >= .8 for c in cards)
+    assert "".join(c["text"].replace(" ", "") for c in cards) == "하나둘셋넷다섯여섯일곱여덟아홉열개직원들의계정을안전하게보호합니다."
+    assert all(a["end"] <= b["start"] for a, b in zip(cards, cards[1:]))
+    assert all(len(chunks(c["text"], limit=9)) <= 3 for c in cards)

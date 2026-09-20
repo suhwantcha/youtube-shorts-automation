@@ -6,25 +6,41 @@ import sys
 import wave
 
 
-def synthesize(output):
-    rate, bpm = 24000, 112
+def synthesize(output, duration=32, mood="neutral"):
+    if not math.isfinite(duration) or not 0 < duration <= 180:
+        raise ValueError("배경음악 길이는 0~180초 범위여야 합니다.")
+    if mood not in {"neutral", "tense", "bright"}:
+        raise ValueError("지원하지 않는 배경음악 분위기입니다.")
+    rate, bpm = 24000, {"neutral": 96, "tense": 104, "bright": 108}[mood]
     beat = 60 / bpm
-    duration = 16 * beat
-    # Four soft chords, a restrained pluck and a low pulse; no vocals.
-    chords = [(130.81, 164.81, 196.00), (110.00, 130.81, 164.81),
-              (87.31, 110.00, 130.81), (98.00, 123.47, 146.83)]
+    # A full-length arrangement: sparse opening/ending, alternating voicings,
+    # evolving pad and pluck patterns. No short waveform is looped.
+    minor = [(110, 130.81, 164.81), (87.31, 110, 130.81),
+             (130.81, 164.81, 196), (98, 146.83, 196)]
+    major = [minor[2], minor[0], minor[1], minor[3]]
+    chords = major if mood == "bright" else minor
     samples = array("h")
     for i in range(round(rate * duration)):
         t = i / rate
-        chord = chords[min(3, int(t / (4 * beat)))]
+        bar = int(t / (4 * beat))
+        phrase = bar // 4
+        chord = chords[bar % 4]
+        if phrase % 2:
+            chord = (chord[0], chord[1], chord[2] * 2)
         chord_time = t % (4 * beat)
         envelope = min(1, chord_time / .1) * min(1, (4 * beat - chord_time) / .15)
-        pad = sum(math.sin(2 * math.pi * f * t) for f in chord) * .045 * envelope
+        swell = .75 + .25 * math.sin(2 * math.pi * t / 29)
+        pad = sum(math.sin(2 * math.pi * f * t) + .12 * math.sin(2 * math.pi * 2*f*t)
+                  for f in chord) * .035 * envelope * swell
         pulse_time = t % beat
-        pulse = math.sin(2 * math.pi * 55 * pulse_time) * math.exp(-pulse_time * 25) * .07
-        note = chord[int(t / beat) % 3] * 2
-        pluck = math.sin(2 * math.pi * note * pulse_time) * math.exp(-pulse_time * 12) * .035
-        samples.append(round((pad + pulse + pluck) * 32767))
+        active = t > 4 * beat and t < duration - 4 * beat
+        pulse = math.sin(2 * math.pi * chord[0]/2 * pulse_time) * math.exp(-pulse_time * 25) * .05 if active else 0
+        step = int(t / beat)
+        note = chord[(step + phrase) % 3] * 2
+        pluck = (math.sin(2 * math.pi * note * pulse_time) * math.exp(-pulse_time * 12) * .025
+                 if active and (step + phrase) % 4 != 3 else 0)
+        fade = min(1, t/1.5, (duration-t)/2)
+        samples.append(round((pad + pulse + pluck) * fade * 32767))
     if sys.byteorder != "little":
         samples.byteswap()
     with wave.open(str(Path(output)), "wb") as stream:

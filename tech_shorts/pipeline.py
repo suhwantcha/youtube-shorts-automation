@@ -14,6 +14,8 @@ def validate_inputs(data, allow_local=False):
     if not isinstance(data, dict):
         raise ValueError("JSON 객체가 필요합니다.")
     result = {}
+    from .topics import category_info
+    result["category"] = category_info(data.get("category", "it"))["id"]
     limits = {"topic": 200, "notes": 75000, "script": 3000}
     for key, limit in limits.items():
         value = data.get(key, "")
@@ -89,9 +91,11 @@ class Pipeline:
                 queries = job.get("background_queries", [])
             elif inputs["script"]:
                 script = content.clean_script(inputs["script"])
-                queries = inputs["background_queries"] or ["typing laptop", "circuit board", "server room"]
+                from .topics import category_info
+                queries = inputs["background_queries"] or [category_info(inputs.get("category", "it"))["english_query"]]
             else:
-                generated = content.generate_script(inputs["topic"], inputs["notes"], settings)
+                generated = content.generate_script(inputs["topic"], inputs["notes"], settings,
+                                                    category=inputs.get("category", "it"))
                 script, queries = generated["script"], inputs["background_queries"] or generated["background_queries"]
                 editorial = generated
                 self.store.update(job_id, {"title": generated["title"], "editorial": editorial})
@@ -163,10 +167,24 @@ class Pipeline:
                 scene_durations = [beat["end"] - beat["start"] for beat in beats]
             self.store.update(job_id, {"sources": sources})
             self.store.update(job_id, {"stage": "영상 렌더링"})
+            last_stage = None
+            def render_progress(stage):
+                nonlocal last_stage
+                if stage != last_stage:
+                    self.store.update(job_id, {"stage": stage}, expected={"running"})
+                    if " · " not in stage:
+                        log.info("Job %s: %s", job_id, stage)
+                    last_stage = stage
             video = work / "video.mp4"
             report = media.render(audio, backgrounds, srt, video, width=settings.width, height=settings.height, fps=settings.fps, scene_durations=scene_durations,
                                   subtitle_style=inputs.get("subtitle_style", "focus"),
-                                  bgm=inputs.get("bgm", True), bgm_path=settings.bgm_path)
+                                  bgm=inputs.get("bgm", True), bgm_path=settings.bgm_path,
+                                  music_mood=(editorial or {}).get("music_mood", "neutral"), progress=render_progress)
+            cards = subtitles.display_cues(srt.read_text(encoding="utf-8-sig"))
+            report["captions"] = {"cards": len(cards),
+                "under_one_second": sum(c["end"]-c["start"] < 1 for c in cards),
+                "minimum_seconds": round(min(c["end"]-c["start"] for c in cards), 3)}
+            report["music_mood"] = (editorial or {}).get("music_mood", "neutral")
             save("video", video)
             media.thumbnail(video, work / "poster.jpg")
             save("poster", work / "poster.jpg")
@@ -175,12 +193,15 @@ class Pipeline:
                 "background_music": report.get("background_music", "off"), "narration_speed": settings.speed,
                 "editorial": editorial, "scene_plan": beats, "subtitle_style": inputs.get("subtitle_style", "focus"),
                 "ai_voice": not bool(inputs.get("audio_path")), "subtitle_mode": inputs["subtitle_mode"],
-                "topic": inputs["topic"], "source_notes": inputs["notes"]},
+                "topic": inputs["topic"], "category": inputs.get("category", "it"), "source_notes": inputs["notes"]},
                 ensure_ascii=False, indent=2), encoding="utf-8")
             save("manifest", work / "manifest.json")
+            self.store.update(job_id, {"stage": "추천 제목·썸네일 제작"})
+            from .presentation import prepare
+            prepare(job_id, settings, self.store, self.artifacts)
             return self.store.update(job_id, {"status": "pending_approval", "stage": "영상 검토 대기", "quality": report}, expected={"running"})
         except Exception as exc:
             from .service import safe_error
-            log.error("Job %s failed (%s)", job_id, type(exc).__name__)
+            log.error("Job %s failed: %s", job_id, safe_error(exc))
             self.store.update(job_id, {"status": "failed", "error": safe_error(exc)}, expected={"running"})
             raise

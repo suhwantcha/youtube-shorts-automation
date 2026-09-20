@@ -16,25 +16,35 @@ class Service:
     def create(self, data, allow_local=False):
         return self.store.create(validate_inputs(data, allow_local))
 
-    def create_auto(self):
+    def prepare_presentation(self, job_id):
+        from .presentation import prepare
+        return prepare(job_id, self.settings, self.store, self.artifacts)
+
+    def create_auto(self, options=None):
         from .content import all_trends
         from .sources import article_notes
         import hashlib
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-        day = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
-        job_id = hashlib.sha256(("automatic:" + day).encode()).hexdigest()[:32]
+        from datetime import datetime, timedelta, timezone
+        options = options or {}
+        defaults = {"voice": self.settings.voice, "speed": self.settings.speed,
+                    "tts_provider": self.settings.tts_provider}
+        defaults.update({k: options[k] for k in ("category", "voice", "speed", "tts_provider", "bgm", "subtitle_style") if k in options})
+        category = validate_inputs({"topic": "자동 주제", "notes": "자동 자료", **defaults})["category"]
+        # Daily KST identity must also work on Windows without an IANA tz database.
+        day = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+        identity = "automatic:" + day + (":" + category if category != "it" else "")
+        job_id = hashlib.sha256(identity.encode()).hexdigest()[:32]
         try:
             return self.store.get(job_id)
         except KeyError:
             pass
-        for topic in all_trends()[:10]:
+        for topic in (all_trends() if category == "it" else all_trends(category=category))[:10]:
             try:
                 notes = article_notes(topic["url"])
             except Exception:
                 continue
             inputs = validate_inputs({"topic": topic["title"][:200], "notes": notes,
-                                      "voice": self.settings.voice, "speed": self.settings.speed})
+                                      **defaults})
             inputs["source_url"] = topic["url"]
             try:
                 return self.store.create(inputs, job_id=job_id)
@@ -52,6 +62,8 @@ class Service:
         # Explicit operator action only, after ensuring no worker is still running.
         recovered = []
         for job in self.store.list(1000):
+            if job.get("presentation_status") == "running":
+                self.store.update(job["id"], {"presentation_status": "failed", "presentation_error": "제목·썸네일 제작이 중단되었습니다. 다시 생성해주세요."})
             if job["status"] in {"queued", "running"}:
                 self.store.update(job["id"], {"status": "interrupted", "stage": "실행 중단 — 재시도 가능"}, expected={job["status"]})
                 recovered.append(job["id"])
@@ -94,7 +106,13 @@ class Service:
                     else:
                         path = self.artifacts.restore(job_id, job["artifacts"]["video"])
                         adapter = YouTube() if platform == "youtube" else TikTok()
-                        result = adapter.upload(path, job, options, update)
+                        adapter_options = dict(options)
+                        if platform == "youtube" and "thumbnail" in job["artifacts"]:
+                            try:
+                                adapter_options["thumbnail_path"] = self.artifacts.restore(job_id, job["artifacts"]["thumbnail"])
+                            except FileNotFoundError:
+                                pass
+                        result = adapter.upload(path, job, adapter_options, update)
                     checkpoint(platform, result)
                 except Exception as exc:
                     previous = results.get(platform, {})
@@ -150,6 +168,18 @@ class Service:
 def safe_error(exc):
     # HTTP errors can embed bearer tokens and signed upload URLs. Persist a useful category instead.
     import requests
+    from google.auth.exceptions import RefreshError
+    from .media import MediaError
+    if isinstance(exc, RefreshError):
+        details = next((arg for arg in exc.args if isinstance(arg, dict)), {})
+        code = details.get("error")
+        if code == "invalid_grant":
+            return "Google 인증이 만료되었거나 취소되었습니다 (invalid_grant). 계정을 다시 인증하고 새 refresh token을 설정한 뒤 서버를 재시작해주세요. 완성된 영상은 다시 제작할 필요가 없습니다."
+        if code in {"invalid_client", "unauthorized_client"}:
+            return "Google OAuth 클라이언트 인증에 실패했습니다. client ID·secret과 refresh token이 같은 OAuth 클라이언트에서 발급되었는지 확인해주세요."
+        return "Google 인증 토큰 갱신에 실패했습니다. 계정 인증과 OAuth 설정을 확인해주세요."
+    if isinstance(exc, MediaError):
+        return str(exc)
     if isinstance(exc, requests.RequestException):
         status = exc.response.status_code if exc.response is not None else "연결 오류"
         return f"외부 서비스 요청 실패 ({status}). 계정 연결과 서비스 상태를 확인해주세요."

@@ -27,8 +27,14 @@ def test_render_end_to_end_without_network(service, monkeypatch, tmp_path):
     assert result["quality"]["background_music"] == "synthesized"
     assert (result["quality"]["width"],result["quality"]["height"]) == (360,640)
     assert abs(result["duration"] - result["quality"]["duration"]) < .5
-    assert set(result["artifacts"]) == {"audio","script","subtitles","video","poster","manifest"}
+    assert set(result["artifacts"]) == {"audio","script","subtitles","video","poster","manifest","thumbnail"}
+    assert len(result["title_suggestions"]) == 3
+    assert result["presentation_status"] == "ready"
     assert result["uploads"] == {}
+    stages = [event["stage"] for event in result["events"]]
+    assert any(stage.startswith("장면 렌더링 1/") for stage in stages)
+    assert "최종 합성·자막 입히기 · 100%" in stages
+    assert "완성 영상 검증" in stages
 
 
 def test_failed_render_reuses_paid_audio_and_subtitles(service, monkeypatch):

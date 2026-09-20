@@ -6,6 +6,29 @@ import requests
 
 from tech_shorts.publishers import TikTok, Instagram, aggregate
 from tech_shorts.store import Conflict
+from tech_shorts.service import safe_error
+from google.auth.exceptions import RefreshError
+
+
+def test_expired_youtube_auth_preserves_video_and_reports_reconnect(service, approved_job, monkeypatch):
+    error = RefreshError("secret-token", {"error": "invalid_grant", "error_description": "secret-token"})
+    monkeypatch.setattr("google.oauth2.credentials.Credentials.refresh", Mock(side_effect=error))
+    for name in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"):
+        monkeypatch.setenv(name, "fixture")
+    result = service.publish(approved_job["id"], {"platforms": ["youtube"]})
+    assert result["status"] == "upload_failed"
+    assert result["artifacts"] == approved_job["artifacts"]
+    upload = result["uploads"]["youtube"]
+    assert upload["status"] == "failed" and not upload.get("uncertain")
+    assert "invalid_grant" in upload["error"]
+    assert "secret-token" not in upload["error"]
+
+
+@pytest.mark.parametrize("code", ["invalid_client", "unauthorized_client", "unexpected-secret"])
+def test_google_auth_errors_do_not_expose_response(code):
+    message = safe_error(RefreshError("secret-token", {"error": code, "error_description": "secret-token"}))
+    assert "Google" in message
+    assert "secret-token" not in message and "unexpected-secret" not in message
 
 
 def response(data):

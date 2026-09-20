@@ -14,6 +14,7 @@ from . import __version__, content, media, review
 from .config import Settings
 from .service import Service, safe_error
 from .store import make_store, Conflict
+from .topics import category_choices, category_info
 
 log = logging.getLogger(__name__)
 
@@ -126,11 +127,13 @@ def create_app(settings=None, store=None):
             "tiktok": bool(os.getenv("TIKTOK_ACCESS_TOKEN")),
             "instagram": all(os.getenv(k) for k in ("INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID", "META_API_VERSION")) and bool(settings.bucket),
             "gmail": all(os.getenv(k) for k in ("ADMIN_EMAIL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")) and bool(settings.api_token and settings.base_url),
-        }, backend=settings.backend, defaults={"voice": settings.voice, "speed": settings.speed, "tts_provider": settings.tts_provider})
+        }, backend=settings.backend, categories=category_choices(), defaults={"category": "it", "voice": settings.voice, "speed": settings.speed, "tts_provider": settings.tts_provider})
 
     @app.get("/api/trends")
     def trends():
-        return jsonify(topics=content.all_trends())
+        category = category_info(request.args.get("category", "it"))["id"]
+        topics = content.all_trends() if category == "it" else content.all_trends(category=category)
+        return jsonify(topics=topics, category=category)
 
     @app.post("/api/source")
     def source():
@@ -144,11 +147,11 @@ def create_app(settings=None, store=None):
     def draft():
         from .pipeline import validate_inputs
         inputs = validate_inputs(body())
-        return jsonify(content.generate_script(inputs["topic"], inputs["notes"], settings))
+        return jsonify(content.generate_script(inputs["topic"], inputs["notes"], settings, category=inputs["category"]))
 
     @app.post("/api/jobs/auto")
     def auto_job():
-        job = service.create_auto()
+        job = service.create_auto(body() if request.is_json else None)
         if job["status"] == "queued":
             dispatch(service.run, job["id"])
         return jsonify(job), 202
@@ -193,6 +196,14 @@ def create_app(settings=None, store=None):
         if job["status"] not in {"approved", "partial", "upload_failed", "published"}:
             raise Conflict("영상 승인 후 게시할 수 있습니다.")
         dispatch(service.publish, job_id, data)
+        return jsonify(status="queued", id=job_id), 202
+
+    @app.post("/api/jobs/<job_id>/presentation")
+    def presentation(job_id):
+        job = service.store.get(job_id)
+        if "video" not in job.get("artifacts", {}) or job["status"] in {"running", "queued", "publishing"}:
+            raise Conflict("영상 제작과 진행 중인 게시가 끝난 뒤 생성해주세요.")
+        dispatch(service.prepare_presentation, job_id)
         return jsonify(status="queued", id=job_id), 202
 
     @app.post("/api/jobs/<job_id>/refresh-uploads")

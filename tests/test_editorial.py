@@ -13,7 +13,7 @@ DRAFT = {"title": "보안 사례", "body": "오픈에이아이와 해크트론�
          "engagement": "연결된 계정의 권한을 확인해 보셨나요?"}
 REVIEW = {"coverage": [{"id":"F1","quote":"두 취약점"},{"id":"F2","quote":"열네 시간 만에 수정"}],
           "missing": [], "unsupported": [], "names_ok": True, "ending_ok": True,
-          "jargon_ok": True, "unexplained_terms": []}
+          "jargon_ok": True, "unexplained_terms": [], "story_ok": True, "readability_ok": True}
 
 
 def test_auto_review_preserves_names_all_facts_and_ending(monkeypatch):
@@ -94,12 +94,34 @@ def test_unexplained_specialist_terms_trigger_rewrite(monkeypatch):
     assert "ImageMagick" in api.call_args_list[3].args[2]["feedback"]
 
 
-def test_glossary_requires_actual_explanation_near_first_use():
+def test_natural_glossary_paraphrase_is_allowed_in_composition():
     dossier = {"facts": [], "names": [], "technical_terms": [
-        {"term": "SSO", "aliases": ["통합 로그인"], "explanation": "여러 서비스에 한 번에 로그인하는 방식"}]}
-    with pytest.raises(ValueError, match="SSO"):
-        editorial.compose({**DRAFT, "body": "SSO 설정 문제입니다. " + DRAFT["body"]}, dossier)
-    script, _, _ = editorial.compose({**DRAFT, "body": "여러 서비스에 한 번에 로그인하는 방식인 SSO 설정 문제입니다. " + DRAFT["body"]}, dossier)
-    assert "로그인하는 방식인 SSO" in script
-    with pytest.raises(ValueError, match="SSO"):
-        editorial.compose({**DRAFT, "body": "통합 로그인 설정 문제입니다. " + DRAFT["body"]}, dossier)
+        {"term": "SSO", "aliases": [], "explanation": "여러 서비스에 한 번에 로그인하는 방식"}]}
+    text = "SSO는 한 번 로그인해서 여러 서비스를 쓰는 방식입니다. "
+    script, _, _ = editorial.compose({**DRAFT, "body": text + DRAFT["body"]}, dossier)
+    assert text in script
+
+
+def test_question_is_placed_before_answer_not_section_midpoint():
+    dossier = {"facts": [{"id": f"F{i}"} for i in range(1, 5)], "names": []}
+    sections = [{"id": f"F{i}", "narration": f"사실{i}. " + "원인과 영향을 설명합니다. " * 8} for i in range(1, 5)]
+    script, _, _ = editorial.compose({**DRAFT, "body": "사건이 발생했습니다.",
+        "fact_sections": sections, "mid_before_id": "F4"}, dossier)
+    assert DRAFT["mid_question"] + " 사실4." in script
+    with pytest.raises(ValueError, match="mid_before_id"):
+        editorial.compose({**DRAFT, "fact_sections": sections, "mid_before_id": "F9"}, dossier)
+
+
+@pytest.mark.parametrize("flag", ["story_ok", "readability_ok"])
+def test_story_and_jargon_density_failures_trigger_rewrite(monkeypatch, flag):
+    api = Mock(side_effect=[BRIEF, DRAFT, {**REVIEW, flag: False}, DRAFT, REVIEW])
+    monkeypatch.setattr(editorial, "ask", api)
+    editorial.generate("주제", NOTES, Settings())
+    assert flag in api.call_args_list[3].args[2]["feedback"]
+
+
+def test_selected_category_reaches_the_writer(monkeypatch):
+    api = Mock(side_effect=[BRIEF, DRAFT, REVIEW])
+    monkeypatch.setattr(editorial, "ask", api)
+    editorial.generate("주제", NOTES, Settings(), category="history")
+    assert api.call_args_list[1].args[2]["category"] == "역사"

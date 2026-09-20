@@ -5,6 +5,16 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
+
+
+class MediaError(RuntimeError):
+    """Render diagnostics safe to surface separately from HTTP client errors."""
+
+    def __init__(self, message):
+        # FFmpeg may echo an input URL; never retain credentials or signed queries.
+        message = re.sub(r"https?://\S+", "[URL omitted]", message)
+        super().__init__(message)
 
 
 def ffmpeg():
@@ -18,12 +28,43 @@ def ffmpeg():
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def run(args, *, cwd=None, timeout=900):
-    result = subprocess.run([ffmpeg(), "-hide_banner", "-nostdin", "-y", *map(str, args)],
-                            cwd=cwd, capture_output=True, timeout=timeout)
+def run(args, *, cwd=None, timeout=900, on_progress=None, duration=None):
+    command = [ffmpeg(), "-hide_banner", "-nostdin", "-y"]
+    if on_progress is not None:
+        command += ["-progress", "pipe:1", "-nostats"]
+    command += list(map(str, args))
+    try:
+        if on_progress is None:
+            result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=timeout)
+        else:
+            def report(output):
+                values = re.findall(rb"out_time_us=(\d+)", output or b"")
+                if values and duration:
+                    on_progress(min(99, int(int(values[-1]) / 10000 / duration)))
+            started = time.monotonic()
+            with subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+                try:
+                    while True:
+                        remaining = timeout - (time.monotonic()-started)
+                        if remaining <= 0:
+                            raise subprocess.TimeoutExpired(command, timeout)
+                        try:
+                            stdout, stderr = process.communicate(timeout=min(1, remaining))
+                            break
+                        except subprocess.TimeoutExpired as exc:
+                            report(exc.output)
+                    result = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.communicate()
+    except subprocess.TimeoutExpired as exc:
+        raise MediaError(f"영상 처리 제한 시간({timeout}초)을 초과했습니다.") from exc
     if result.returncode:
         message = result.stderr.decode("utf-8", "replace")[-2500:]
-        raise RuntimeError("영상 처리 실패: " + message)
+        raise MediaError(f"영상 처리 실패 (FFmpeg 종료 코드 {result.returncode}): " + message)
+    if on_progress is not None:
+        on_progress(100)
     return result
 
 
@@ -57,7 +98,7 @@ def korean_font():
     raise ValueError("한글 폰트가 없습니다. KOREAN_FONT에 폰트 파일 경로를 지정해주세요.")
 
 
-def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180, scene_durations=None, subtitle_style="focus", bgm=True, bgm_path=""):
+def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180, scene_durations=None, subtitle_style="focus", bgm=True, bgm_path="", music_mood="neutral", progress=None):
     from tempfile import TemporaryDirectory
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,12 +107,14 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
         raise ValueError(f"음성이 {max_duration}초를 초과합니다. 대본을 줄여주세요.")
     if not backgrounds:
         raise ValueError("배경 영상이 필요합니다.")
+    progress = progress or (lambda stage: None)
     # Keep filter references relative: Windows drive colons and spaces never enter libass syntax.
     with TemporaryDirectory(prefix="render_", dir=output_path.parent) as temp:
         work = Path(temp)
         from .subtitles import to_ass
         narration = Path(audio_path).resolve()
         if bgm:
+            progress("배경음악 생성·음성 믹싱")
             from . import music
             if bgm_path:
                 bed = Path(bgm_path).expanduser().resolve()
@@ -79,7 +122,7 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
                     raise ValueError("배경음악 파일에 오디오가 없습니다.")
             else:
                 bed = work / "music.wav"
-                music.synthesize(bed)
+                music.synthesize(bed, duration=duration, mood=music_mood)
             narration = work / "mix.wav"
             music.mix(audio_path, bed, narration, duration)
         font_name = "Malgun Gothic" if os.name == "nt" else "Noto Sans CJK KR"
@@ -97,6 +140,8 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
         frame_cursor, time_cursor = 0, 0.0
         names = []
         for index, section in enumerate(sections):
+            stage = f"장면 렌더링 {index+1}/{len(sections)}"
+            progress(stage)
             background = backgrounds[index % len(backgrounds)]
             name = f"scene_{index:03d}.mp4"
             scale = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height},setsar=1,fps={fps}"
@@ -106,21 +151,25 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
             frame_cursor = frame_end
             run(["-stream_loop", "-1", "-i", Path(background).resolve(), "-frames:v", str(frames),
                  "-an", "-vf", scale, "-c:v", "libx264", "-preset", "fast", "-crf", "18",
-                 "-pix_fmt", "yuv420p", "-threads", "2", name], cwd=work)
+                 "-pix_fmt", "yuv420p", "-threads", "2", name], cwd=work,
+                duration=section, on_progress=lambda percent: progress(f"{stage} · {percent}%"))
             names.append(f"file '{name}'")
         (work / "concat.txt").write_text("\n".join(names), encoding="utf-8")
+        progress("최종 합성·자막 입히기")
         run(["-f", "concat", "-safe", "0", "-i", "concat.txt", "-i", narration,
              "-vf", "ass=captions.ass:fontsdir=fonts",
              "-map", "0:v:0", "-map", "1:a:0", "-t", f"{duration:.6f}",
              "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
              "-af", "anull" if bgm else "loudnorm=I=-16:TP=-1.5:LRA=11", "-ar", "48000",
-             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-threads", "2", "final.mp4"], cwd=work)
+             "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-threads", "2", "final.mp4"], cwd=work,
+            duration=duration, on_progress=lambda percent: progress(f"최종 합성·자막 입히기 · {percent}%"))
+        progress("완성 영상 검증")
         report = inspect(work / "final.mp4")
         report["background_music"] = ("custom" if bgm_path else "synthesized") if bgm else "off"
         if not report["has_audio"] or (report["width"], report["height"]) != (width, height):
-            raise RuntimeError("완성 영상의 오디오 또는 해상도 검증에 실패했습니다.")
+            raise MediaError("완성 영상의 오디오 또는 해상도 검증에 실패했습니다.")
         if abs(report["duration"] - duration) > 0.5:
-            raise RuntimeError("영상과 음성 길이가 일치하지 않습니다.")
+            raise MediaError(f"영상과 음성 길이가 일치하지 않습니다. 영상 {report['duration']:.2f}초 / 음성 {duration:.2f}초")
         shutil.move(str(work / "final.mp4"), str(output_path))
     return report
 

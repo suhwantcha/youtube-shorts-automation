@@ -41,3 +41,14 @@ def test_synthesized_bed_is_valid_and_deterministic(tmp_path):
     music.synthesize(second)
     assert first.read_bytes() == second.read_bytes()
     assert media.inspect(first)["has_audio"]
+
+
+def test_arrangement_matches_duration_and_changes_between_phrases(tmp_path):
+    output = tmp_path / "tense.wav"
+    music.synthesize(output, duration=23.5, mood="tense")
+    with wave.open(str(output)) as stream:
+        rate = stream.getframerate()
+        assert stream.getnframes() / rate == 23.5
+        data = stream.readframes(stream.getnframes())
+    phrase_bytes = round(16 * 60 / 104 * rate) * 2
+    assert data[:rate*2] != data[phrase_bytes:phrase_bytes+rate*2]

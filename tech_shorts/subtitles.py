@@ -190,24 +190,47 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def display_cues(srt):
-    """Join recognition fragments into readable cards without shifting speech onset.
+    """Plan card boundaries globally so greedy merges cannot strand tiny fragments.
 
-    Keep the 96px font and allow up to three lines. Short fragments can share a
-    card; pauses over 350ms and long cards remain separate. SRT stays untouched.
+    Preserve phrase endpoints, three-line capacity and pauses. Within a phrase,
+    estimate word timing by character weight to allow balanced reflow. A minimum
+    duration is a preference, never permission to overlap or erase spoken text.
     """
-    result = []
-    for cue in read_srt(srt):
-        if result:
-            prior = result[-1]
-            joined = prior["text"] + " " + cue["text"]
-            if (0 <= cue["start"] - prior["end"] <= .35
-                    and cue["end"] - prior["start"] <= 4.5
-                    and len(chunks(joined, limit=9)) <= 3
-                    and (prior["end"] - prior["start"] < 1.8
-                         or not prior["text"].endswith((".", "?", "!")))):
-                prior.update(text=joined, end=cue["end"])
-                continue
-        result.append(dict(cue))
+    cues = []
+    for phrase in read_srt(srt):
+        words = phrase["text"].split()
+        total = sum(map(len, words))
+        consumed = 0
+        for word in words:
+            start = phrase["start"] + (phrase["end"]-phrase["start"]) * consumed/total
+            consumed += len(word)
+            end = phrase["start"] + (phrase["end"]-phrase["start"]) * consumed/total
+            cues.append(dict(start=start, end=end, text=word))
+    costs, choices = [float("inf")] * (len(cues) + 1), {}
+    costs[-1] = 0
+    for i in range(len(cues)-1, -1, -1):
+        text = ""
+        for j in range(i, len(cues)):
+            if j > i and not 0 <= cues[j]["start"] - cues[j-1]["end"] <= .35:
+                break
+            text = (text + " " + cues[j]["text"]).strip()
+            duration = cues[j]["end"] - cues[i]["start"]
+            if j > i and (duration > 4.5 or len(chunks(text, limit=9)) > 3):
+                break
+            # Penalize sub-second cards and excessive reading speed; favor
+            # punctuation boundaries without requiring one card per sentence.
+            score = (1 + 80 * max(0, 1-duration) ** 2
+                     + max(0, len(text)/max(duration, .01)-16) ** 2 * .05
+                     + (0 if text.endswith((".", "?", "!")) else .5))
+            if score + costs[j+1] < costs[i]:
+                costs[i] = score + costs[j+1]
+                choices[i] = j
+    result, i = [], 0
+    while i < len(cues):
+        j = choices[i]
+        result.append(dict(start=cues[i]["start"], end=cues[j]["end"],
+                           text=" ".join(c["text"] for c in cues[i:j+1])))
+        i = j + 1
     for i, cue in enumerate(result[:-1]):
         # Hold through tiny recognition gaps, never across the next spoken card.
         cue["end"] = min(result[i+1]["start"], cue["end"] + .2)
