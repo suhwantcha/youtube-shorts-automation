@@ -13,7 +13,7 @@ Automation clients authenticate with `Authorization: Bearer <SHORTS_API_TOKEN>`.
 | GET | `/api/trends?category=science` | Up to ten recent news or popular community articles for the selected field |
 | POST | `/api/source` | Extract article text from `{ "url": "https://..." }` |
 | POST | `/api/draft` | Generate and review a draft from `topic` and `notes`; no narration or video |
-| POST | `/api/jobs/<id>/presentation` | Prepare three title suggestions and a portrait thumbnail for an existing video; no video regeneration or publication |
+| POST | `/api/jobs/<id>/presentation` | Prepare three title suggestions and a portrait thumbnail for an existing video; adds a 0.5-second cover without regenerating narration or publishing |
 | GET | `/api/jobs` | List recent jobs |
 | POST | `/api/jobs` | Create and dispatch a video production job |
 | POST | `/api/jobs/auto` | Select a readable trending article and produce a video for review |
@@ -104,4 +104,4 @@ News searches use English keywords and the en-US market for both relevance and n
 
 New productions prepare assets before entering review. Existing jobs can call `POST /api/jobs/<id>/presentation` and poll the job for `presentation_status` (`running`, `ready`, or `failed`), `presentation_error`, `title_suggestions` and `thumbnail_title`. The response is `202`; completion is asynchronous. Successful titles and images are reused on repeated calls. The `thumbnail` artifact is a 1080 x 1920 JPEG available through the existing artifact endpoint. Posting-title edits do not alter the cover text. Asset failure leaves video state intact.
 
-YouTube attempts thumbnail application after checkpointing successful video upload. Results include `thumbnail_status` (`uploaded` or `failed`) and a separate `warning` if necessary. No thumbnail application is performed for TikTok or Instagram.
+The generated image is prepended as a silent 0.5-second shot. `cover_intro_seconds` is `0.5` after successful composition; `duration` and `quality` describe the final video. `body_video` and `body_subtitles` preserve originals. `video` and `subtitles` point to the new MP4 and shifted SRT. Scene-plan times remain relative to the body; the manifest records `body_timeline_offset_seconds`. Repeating preparation does not duplicate the intro. Failures preserve the original artifact references. Existing uploaded posts are not replaced. Separate YouTube thumbnail upload is no longer attempted; users select the opening frame on their platform.

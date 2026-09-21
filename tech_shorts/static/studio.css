@@ -7,3 +7,6 @@
 .caption-sample p{font-size:36px;line-height:1.25}
 
 #publish-dialog{width:min(760px,95vw)}.publish-assets{display:grid;grid-template-columns:1fr 150px;gap:24px;padding:20px;background:#f5f8fc;border-radius:12px;margin:20px 0}.publish-assets h3{margin:4px 0}.publish-assets .hint{margin:10px 0}.publish-assets img{width:150px;border-radius:10px;display:block}.publish-assets a{display:block;font-size:11px;margin-top:8px}.title-choice{display:block;width:100%;text-align:left;background:white;border:1px solid #dce5f2;border-radius:8px;padding:10px 12px;margin:8px 0;color:#253043;font-size:13px}.title-choice:hover{border-color:#2768ed;background:#edf3ff}#prepare-presentation{margin-top:10px}@media(max-width:540px){.publish-assets{grid-template-columns:1fr}.publish-assets img{width:120px}}
+#trends .source-status {margin:0 0 16px;padding:10px 14px;border-left:3px solid #695cf6;font-size:13px;line-height:1.6}
+#trends .source-status a {display:block;margin-top:6px}
+#trends .trend-card[aria-busy="true"] {opacity:.7;cursor:wait}

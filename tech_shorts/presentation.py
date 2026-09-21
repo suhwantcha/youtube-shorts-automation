@@ -1,6 +1,8 @@
 """Grounded publishing titles and a reusable portrait cover made from video footage."""
 from pathlib import Path
 import tempfile
+import json
+import re
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
@@ -95,6 +97,38 @@ def prepare(job_id, settings, store, artifacts):
             create_thumbnail(source, path, titles[0], job["inputs"].get("category", "it"))
             saved["thumbnail"] = artifacts.save(job_id, path)
             store.update(job_id, {"artifacts": saved, "thumbnail_title": titles[0]})
+        if not job.get("cover_intro_seconds"):
+            work = artifacts.directory(job_id)
+            body = saved.get("body_video", saved["video"])
+            video = artifacts.restore(job_id, body)
+            cover = artifacts.restore(job_id, saved["thumbnail"])
+            # Separate files + a single metadata switch preserve the playable original on failure.
+            path = work / "video_with_cover.mp4"
+            report = media.prepend_cover(video, cover, path, fps=settings.fps,
+                progress=lambda percent: store.update(job_id, {"presentation_progress": f"0.5초 표지 합성 · {percent}%"}))
+            saved["body_video"] = body
+            saved["video"] = artifacts.save(job_id, path)
+            if "subtitles" in saved:
+                original = saved.get("body_subtitles", saved["subtitles"])
+                text = artifacts.restore(job_id, original).read_text(encoding="utf-8-sig")
+                from .subtitles import stamp
+                def shift(match):
+                    h, m, s, ms = map(int, match.groups())
+                    return stamp(h * 3600 + m * 60 + s + ms / 1000 + 0.5)
+                text = re.sub(r"(\d{2,}):(\d{2}):(\d{2}),(\d{3})(?=\s*(?:-->|\r?$))", shift, text, flags=re.M)
+                captions = work / "captions_with_cover.srt"
+                captions.write_text(text, encoding="utf-8")
+                saved["body_subtitles"] = original
+                saved["subtitles"] = artifacts.save(job_id, captions)
+            quality = {**job.get("quality", {}), **report, "cover_intro_seconds": 0.5}
+            if "manifest" in saved:
+                manifest = json.loads(artifacts.restore(job_id, saved["manifest"]).read_text(encoding="utf-8"))
+                manifest.update(quality=quality, cover_intro_seconds=0.5, body_timeline_offset_seconds=0.5)
+                path = work / "manifest_with_cover.json"
+                path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                saved["manifest"] = artifacts.save(job_id, path)
+            store.update(job_id, {"artifacts": saved, "cover_intro_seconds": 0.5,
+                "duration": report["duration"], "quality": quality})
         return store.update(job_id, {"presentation_status": "ready"})
     except Exception as exc:
         from .service import safe_error

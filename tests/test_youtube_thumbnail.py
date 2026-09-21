@@ -22,5 +22,6 @@ def test_thumbnail_failure_never_discards_successful_upload(tmp_path, monkeypatc
     assert result["status"] == "published" and result["success"]
     assert result["privacy"] == "private" and not result["uncertain"]
     assert checkpoint.call_args.args[0]["video_id"] == "video-id"
-    assert result["thumbnail_status"] == ("failed" if failure else "uploaded")
+    api.thumbnails.assert_not_called()
+    assert "thumbnail_status" not in result
     assert "private response" not in str(result)

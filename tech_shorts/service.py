@@ -106,13 +106,7 @@ class Service:
                     else:
                         path = self.artifacts.restore(job_id, job["artifacts"]["video"])
                         adapter = YouTube() if platform == "youtube" else TikTok()
-                        adapter_options = dict(options)
-                        if platform == "youtube" and "thumbnail" in job["artifacts"]:
-                            try:
-                                adapter_options["thumbnail_path"] = self.artifacts.restore(job_id, job["artifacts"]["thumbnail"])
-                            except FileNotFoundError:
-                                pass
-                        result = adapter.upload(path, job, adapter_options, update)
+                        result = adapter.upload(path, job, options, update)
                     checkpoint(platform, result)
                 except Exception as exc:
                     previous = results.get(platform, {})

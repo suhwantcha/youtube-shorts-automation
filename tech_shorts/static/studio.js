@@ -22,7 +22,7 @@ function showJob(job) {
   $("progress-stage").textContent=job.stage;
   if (running) return;
   const hasVideo=Boolean(job.artifacts.video);$("player").hidden=!hasVideo;
-  if(hasVideo){const src=artifactURL(job,"video");if($("player").getAttribute("src")!==src)$("player").src=src;}
+  if(hasVideo){const src=artifactURL(job,"video")+"?version="+encodeURIComponent(job.artifacts.video.name);if($("player").getAttribute("src")!==src)$("player").src=src;}
   else {$("player").removeAttribute("src");$("player").load();}
   $("preview-title").textContent=job.title||job.inputs.topic||"직접 작성한 대본";
   $("preview-info").textContent=job.error||`${job.duration?job.duration.toFixed(1)+"초 · ":""}${job.stage}${job.duration_note?" · "+job.duration_note:""}${job.subtitle_mode==="script"?" · 자막 시간은 대본 길이 기준 추정":""}`;
@@ -68,9 +68,9 @@ function renderPresentation(job){
   const link=$("thumbnail-download");link.hidden=!ready;
   if(ready){const url=artifactURL(job,"thumbnail");if(img.getAttribute("src")!==url)img.src=url;link.href=url+"?download=1";}
   const pending=["queued","running"].includes(job.presentation_status);
-  $("prepare-presentation").disabled=pending||job.presentation_status==="ready";
-  $("prepare-presentation").textContent=pending?"제목·썸네일 제작 중…":job.presentation_status==="ready"?"제목·썸네일 준비 완료":"추천 제목·썸네일 생성";
-  $("presentation-info").textContent=job.presentation_error|| (ready?`썸네일 문구: ${job.thumbnail_title||""}`:"완성된 대본으로 제목 3개와 세로 썸네일을 만듭니다. 제목 생성에는 API 사용료가 발생합니다.");
+  $("prepare-presentation").disabled=pending||(job.presentation_status==="ready"&&Boolean(job.cover_intro_seconds));
+  $("prepare-presentation").textContent=pending?"제목·썸네일 제작 중…":job.cover_intro_seconds?"0.5초 표지 적용 완료":"추천 제목·썸네일 및 0.5초 표지 적용";
+  $("presentation-info").textContent=job.presentation_error|| (pending?job.presentation_progress||"제목·썸네일 제작 중…":ready?`썸네일 문구: ${job.thumbnail_title||""}`:"완성된 대본으로 제목 3개와 세로 썸네일을 만듭니다. 제목 생성에는 API 사용료가 발생합니다.");
   $("presentation-info").className=job.presentation_error?"error":"hint";
 }
 function openPublishAssets(job){openPublish(job);}
@@ -127,8 +127,11 @@ $("publish-form").addEventListener("submit",async(e)=>{
 });
 $("create-form").addEventListener("submit",async(e)=>{e.preventDefault();if(!$("automatic").checked&&(!$("script").value.trim()||!$("script-reviewed").checked)){notice("대본을 작성하거나 생성한 뒤 검토 확인란을 체크해주세요.",true);return;}const b=$("create-button");b.disabled=true;try{const job=await api("/api/jobs",{method:"POST",body:JSON.stringify({category:$("category").value,topic:$("topic").value,notes:$("notes").value,script:$("automatic").checked?"":$("script").value,bgm:$("bgm").checked,subtitle_style:$("subtitle-style").value,tts_provider:$("tts-provider").value,voice:$("voice").value,speed:Number($("speed").value),background_queries:$("queries").value.split(",").map(s=>s.trim()).filter(Boolean)})});selected=job.id;notice("제작을 시작했습니다. 진행 상황을 오른쪽에서 확인하세요.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
 $("refresh-button").addEventListener("click",()=>refresh().catch(e=>notice(e.message,true)));
-let sourceRequest = 0, trendRequest = 0, chosenSources = [];
+let sourceRequest = 0, trendRequest = 0, chosenSources = [], cancelSource = null;
 async function loadTrends(){
+  if(cancelSource)cancelSource();
+  ++sourceRequest;
+  $("create-button").disabled=false;$("draft-button").disabled=false;
   const requestId=++trendRequest, category=$("category").value;
   const b=$("trend-button");b.disabled=true;b.textContent="주제 수집 중…";
   try{
@@ -136,27 +139,46 @@ async function loadTrends(){
     panel.append(node("p",`${$("category").selectedOptions[0].textContent} 추천 ${data.topics.length}개 · 선택하면 기사 자료를 불러옵니다.${data.topics.length<10?" 현재 수집 가능한 결과만 표시합니다.":""}`));
     data.topics.forEach((topic,index)=>{
       const item=node("button",undefined,"trend-card");item.type="button";item.dataset.sourceUrl=topic.url;
+      item.setAttribute("aria-pressed",String(chosenSources.some(s=>s.url===topic.url)));
+      const status=node("p",undefined,"source-status");status.hidden=true;status.setAttribute("role","status");
+      const link=node("a","원문 열기 ↗");link.href=topic.url;link.target="_blank";link.rel="noopener noreferrer";
+      const report=(message,error=false)=>{status.replaceChildren(node("span",message),link);status.hidden=false;status.className=error?"source-status error":"source-status";};
       item.append(node("strong",`${index+1}. ${topic.title}`),node("small",`${topic.source} · ${topic.ranking_basis||"추천"}${typeof topic.score==="number"?" · 반응 "+topic.score:""}${topic.published_at?" · "+new Date(topic.published_at).toLocaleDateString("ko-KR"):""}`));
       item.addEventListener("click",async()=>{
         const combine=$("combine-sources").checked;
         if(combine&&chosenSources.some(s=>s.url===topic.url)){notice("이미 참고 자료에 포함된 기사입니다.");return;}
         if(combine&&chosenSources.length>=3){notice("최대 3개까지 함께 참고할 수 있습니다. 새로 시작하려면 기사 함께 엮기를 해제하세요.");return;}
-        const requestId=++sourceRequest;
+        if(cancelSource)cancelSource();
+        const requestId=++sourceRequest, controller=new AbortController();
+        const timer=setTimeout(()=>controller.abort(),30000);
+        cancelSource=()=>{controller.abort();clearTimeout(timer);item.disabled=false;item.setAttribute("aria-busy","false");report("본문 불러오기를 취소했습니다. 다시 선택할 수 있습니다.");};
+        item.disabled=true;item.setAttribute("aria-busy","true");
+        if(!combine){
+          chosenSources=[];$("topic").value=topic.title.slice(0,200);$("notes").value="";
+          $("script").value="";$("script-reviewed").checked=false;
+          panel.querySelectorAll("button").forEach(el=>el.setAttribute("aria-pressed",String(el===item)));
+        }
+        report("선택한 기사 본문을 불러오는 중… (최대 30초)");
         $("create-button").disabled=true;$("draft-button").disabled=true;
         notice("선택한 기사의 본문을 불러오는 중입니다…");
         try{
-          const data=await api("/api/source",{method:"POST",body:JSON.stringify({url:topic.url})});
+          const data=await api("/api/source",{method:"POST",body:JSON.stringify({url:topic.url}),signal:controller.signal});
           if(requestId!==sourceRequest)return;
           chosenSources=combine?[...chosenSources,{...topic,notes:data.notes}]:[{...topic,notes:data.notes}];
           $("topic").value=chosenSources.map(s=>s.title).join(" / ").slice(0,200);
           $("notes").value=chosenSources.map((s,i)=>`자료 ${i+1}: ${s.title}\n${s.notes}`).join("\n\n").slice(0,75000);
           $("script").value="";$("script-reviewed").checked=false;
           panel.querySelectorAll("button").forEach(el=>el.setAttribute("aria-pressed",String(chosenSources.some(s=>s.url===el.dataset.sourceUrl))));
+          report("기사 자료를 불러왔습니다. 아래의 영상 제작 시작 버튼을 눌러주세요.");
           notice(`${chosenSources.length}개 기사 자료를 불러왔습니다. 영상 제작 시작을 누르면 대본부터 영상까지 자동으로 완성합니다.`);
-        }catch(e){if(requestId===sourceRequest)notice(`${e.message} 출처: ${topic.url} — 핵심 사실을 직접 입력할 수 있습니다.`,true);}
-        finally{if(requestId===sourceRequest){$("create-button").disabled=false;$("draft-button").disabled=false;}}
+        }catch(e){if(requestId===sourceRequest){
+          const message=e.name==="AbortError"?"기사 서버 응답이 30초를 초과했습니다.":e.message;
+          report(`${message} 다른 기사를 선택하거나 원문을 열어 핵심 사실을 직접 입력해주세요.${combine?" 기존 자료는 유지됩니다.":""}`,true);
+          notice(message,true);
+        }}
+        finally{clearTimeout(timer);item.disabled=false;item.setAttribute("aria-busy","false");if(requestId===sourceRequest){cancelSource=null;$("create-button").disabled=false;$("draft-button").disabled=false;}}
       });
-      panel.append(item);
+      panel.append(item,status);
     });
   }catch(e){if(requestId===trendRequest)notice(e.message,true);}finally{if(requestId===trendRequest){b.disabled=false;b.textContent="추천 주제 10개 새로고침 ↻";}}
 }

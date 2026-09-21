@@ -76,6 +76,8 @@ class Pipeline:
             self.store.update(job_id, {"artifacts": dict(saved)})
 
         def cached(key):
+            if key == "subtitles" and "body_subtitles" in saved:
+                key = "body_subtitles"
             if key in saved:
                 try:
                     return self.artifacts.restore(job_id, saved[key])
@@ -186,6 +188,10 @@ class Pipeline:
                 "minimum_seconds": round(min(c["end"]-c["start"] for c in cards), 3)}
             report["music_mood"] = (editorial or {}).get("music_mood", "neutral")
             save("video", video)
+            saved.pop("body_video", None)
+            saved.pop("body_subtitles", None)
+            save("subtitles", srt)
+            self.store.update(job_id, {"cover_intro_seconds": 0, "artifacts": dict(saved)})
             media.thumbnail(video, work / "poster.jpg")
             save("poster", work / "poster.jpg")
             (work / "manifest.json").write_text(json.dumps({"job_id": job_id, "script": script,
@@ -196,10 +202,11 @@ class Pipeline:
                 "topic": inputs["topic"], "category": inputs.get("category", "it"), "source_notes": inputs["notes"]},
                 ensure_ascii=False, indent=2), encoding="utf-8")
             save("manifest", work / "manifest.json")
+            self.store.update(job_id, {"quality": report})
             self.store.update(job_id, {"stage": "추천 제목·썸네일 제작"})
             from .presentation import prepare
             prepare(job_id, settings, self.store, self.artifacts)
-            return self.store.update(job_id, {"status": "pending_approval", "stage": "영상 검토 대기", "quality": report}, expected={"running"})
+            return self.store.update(job_id, {"status": "pending_approval", "stage": "영상 검토 대기"}, expected={"running"})
         except Exception as exc:
             from .service import safe_error
             log.error("Job %s failed: %s", job_id, safe_error(exc))

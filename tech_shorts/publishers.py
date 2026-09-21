@@ -41,14 +41,6 @@ class YouTube:
         result = {"status": "published", "success": True, "uncertain": False, "video_id": response["id"],
                   "url": f"https://www.youtube.com/shorts/{response['id']}", "privacy": response.get("status", {}).get("privacyStatus", options["youtube_privacy"])}
         checkpoint(dict(result))
-        if options.get("thumbnail_path"):
-            try:
-                service.thumbnails().set(videoId=response["id"],
-                    media_body=MediaFileUpload(str(options["thumbnail_path"]), mimetype="image/jpeg")).execute()
-                result["thumbnail_status"] = "uploaded"
-            except Exception:
-                result["thumbnail_status"] = "failed"
-                result["warning"] = "영상 업로드는 완료했지만 썸네일 적용에 실패했습니다. 이미지를 다운로드해 YouTube Studio에서 채널 권한과 적용 여부를 확인해주세요."
         return result
 
 

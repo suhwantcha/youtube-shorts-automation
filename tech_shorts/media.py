@@ -176,3 +176,28 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
 
 def thumbnail(video, output):
     run(["-ss", "0.5", "-i", video, "-frames:v", "1", "-vf", "scale=360:-2", output], timeout=30)
+
+
+def prepend_cover(video, cover, output, *, fps=30, progress=None):
+    """Add exactly 0.5 seconds of cover and silence; keep the entire burned-in body."""
+    report = inspect(video)
+    width, height = report["width"], report["height"]
+    if not width or not height or not report["has_audio"]:
+        raise MediaError("표지를 붙일 영상에 화면과 음성이 필요합니다.")
+    filters = (
+        f"[0:v]scale={width}:{height},setsar=1,fps={fps},trim=duration=0.5,setpts=PTS-STARTPTS[c];"
+        f"[1:v]setsar=1,fps={fps},setpts=PTS-STARTPTS[v];"
+        "anullsrc=r=48000:cl=stereo,atrim=duration=0.5,asetpts=PTS-STARTPTS[s];"
+        "[1:a]aresample=48000,aformat=channel_layouts=stereo,asetpts=PTS-STARTPTS[a];"
+        "[c][s][v][a]concat=n=2:v=1:a=1[outv][outa]"
+    )
+    run(["-loop", "1", "-framerate", fps, "-i", cover, "-i", video,
+         "-filter_complex", filters, "-map", "[outv]", "-map", "[outa]",
+         "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p",
+         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-threads", "2", output],
+        on_progress=progress, duration=report["duration"] + 0.5)
+    final = inspect(output)
+    if (not final["has_audio"] or (final["width"], final["height"]) != (width, height)
+            or abs(final["duration"] - report["duration"] - 0.5) > 0.12):
+        raise MediaError("표지 합성 후 영상 길이·음성 검증에 실패했습니다.")
+    return final

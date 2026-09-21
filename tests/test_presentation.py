@@ -23,9 +23,15 @@ def test_prepare_reuses_titles_and_thumbnail(service, approved_job, monkeypatch)
         Image.new("RGB", (1080, 1920)).save(output)
     image = Mock(side_effect=cover)
     monkeypatch.setattr(presentation, "create_thumbnail", image)
+    def prepend(video, cover, output, **kwargs):
+        output.write_bytes(b"video with intro")
+        return {"duration": 10.5, "width": 1080, "height": 1920, "has_audio": True}
+    intro = Mock(side_effect=prepend)
+    monkeypatch.setattr(media, "prepend_cover", intro)
     for _ in range(2):
         result = service.prepare_presentation(approved_job["id"])
     assert titles.call_count == image.call_count == 1
+    assert intro.call_count == 1 and result["cover_intro_seconds"] == 0.5
     assert result["presentation_status"] == "ready"
     assert result["status"] == "approved" and result["uploads"] == {}
     assert "thumbnail" in result["artifacts"]
@@ -38,6 +44,17 @@ def test_cover_failure_preserves_video_and_paid_titles(service, approved_job, mo
     assert result["title_suggestions"]
     assert result["artifacts"] == approved_job["artifacts"]
     assert result["status"] == "approved"
+
+
+def test_intro_failure_keeps_playable_original(service, approved_job, monkeypatch):
+    def cover(source, output, *args):
+        Image.new("RGB", (1080, 1920)).save(output)
+    monkeypatch.setattr(presentation, "create_thumbnail", cover)
+    monkeypatch.setattr(media, "prepend_cover", Mock(side_effect=media.MediaError("encoding failed")))
+    result = service.prepare_presentation(approved_job["id"])
+    assert result["presentation_status"] == "failed"
+    assert result["artifacts"]["video"] == approved_job["artifacts"]["video"]
+    assert not result.get("cover_intro_seconds")
 
 
 @pytest.mark.parametrize("titles", [[], ["short"] * 3, ["동일한 제목입니다"] * 3, [None, 3, {}]])
