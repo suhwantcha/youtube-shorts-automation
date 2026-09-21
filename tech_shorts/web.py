@@ -91,7 +91,7 @@ def create_app(settings=None, store=None):
             return jsonify(error="작업 또는 결과 파일을 찾을 수 없습니다."), 404
         if isinstance(exc, (ValueError, FileNotFoundError)):
             return jsonify(error=str(exc)), 400
-        log.error("요청 처리 실패 (%s)", type(exc).__name__)
+        log.error("요청 처리 실패 [%s %s]: %s", request.method, request.path, safe_error(exc))
         return jsonify(error=safe_error(exc)), 500
 
     def body():

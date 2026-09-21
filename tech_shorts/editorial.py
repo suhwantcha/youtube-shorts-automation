@@ -3,6 +3,10 @@ import json
 import re
 
 
+class ImageReviewError(RuntimeError):
+    """The provider could not read a stock thumbnail, not a script failure."""
+
+
 def ask(settings, system, data, *, images=None):
     from .content import client
     payload = json.dumps(data, ensure_ascii=False)
@@ -11,11 +15,19 @@ def ask(settings, system, data, *, images=None):
         for identifier, url in images:
             payload.extend([{"type": "text", "text": f"Candidate {identifier}"},
                             {"type": "image_url", "image_url": {"url": url, "detail": "low"}}])
-    response = client().chat.completions.create(
-        model=settings.script_model,
-        messages=[{"role": "system", "content": system + " Return a JSON object."},
-                  {"role": "user", "content": payload}],
-        response_format={"type": "json_object"}, max_tokens=6500, temperature=.25)
+    from openai import BadRequestError
+    try:
+        response = client().chat.completions.create(
+            model=settings.script_model,
+            messages=[{"role": "system", "content": system + " Return a JSON object."},
+                      {"role": "user", "content": payload}],
+            response_format={"type": "json_object"}, max_tokens=6500, temperature=.25)
+    except BadRequestError as exc:
+        if images and exc.code in {"invalid_image", "invalid_image_url", "image_parse_error",
+                                   "image_too_large", "image_too_small", "unsupported_image",
+                                   "invalid_image_format", "failed_to_download_image"}:
+            raise ImageReviewError("배경 후보 이미지를 읽지 못했습니다.") from exc
+        raise
     result = json.loads(response.choices[0].message.content)
     if not isinstance(result, dict):
         raise ValueError("AI 편집 응답 형식이 올바르지 않습니다.")

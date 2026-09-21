@@ -164,6 +164,29 @@ def safe_error(exc):
     import requests
     from google.auth.exceptions import RefreshError
     from .media import MediaError
+    from openai import APIStatusError, APITimeoutError, APIConnectionError
+    if isinstance(exc, APITimeoutError):
+        return "OpenAI 응답 시간이 초과되었습니다. 잠시 후 제작 재시도를 눌러주세요."
+    if isinstance(exc, APIConnectionError):
+        return "OpenAI 연결에 실패했습니다. 네트워크 연결을 확인한 뒤 재시도해주세요."
+    if isinstance(exc, APIStatusError):
+        # Do not persist the raw response message: it may contain signed URLs or user input.
+        reasons = {
+            "invalid_image_url": "후보 이미지 주소를 읽지 못했습니다",
+            "invalid_image": "이미지를 해석하지 못했습니다",
+            "failed_to_download_image": "후보 이미지 다운로드에 실패했습니다",
+            "context_length_exceeded": "모델 입력 길이를 초과했습니다",
+            "invalid_api_key": "API 키를 확인해주세요",
+            "model_not_found": "모델 이름과 접근 권한을 확인해주세요",
+            "insufficient_quota": "API 사용 한도와 결제 설정을 확인해주세요",
+            "unsupported_parameter": "모델이 지원하지 않는 요청 옵션입니다",
+            "rate_limit_exceeded": "API 요청 한도를 초과했습니다",
+        }
+        reason = reasons.get(exc.code, "요청 옵션 또는 외부 입력을 확인해주세요")
+        reference = getattr(exc, "request_id", None)
+        import re
+        suffix = f" · 요청 ID: {reference}" if isinstance(reference, str) and re.fullmatch(r"req_[a-zA-Z0-9_-]{1,100}", reference) else ""
+        return f"OpenAI 요청 실패 (HTTP {exc.status_code}): {reason}{suffix}"
     if isinstance(exc, RefreshError):
         details = next((arg for arg in exc.args if isinstance(arg, dict)), {})
         code = details.get("error")
