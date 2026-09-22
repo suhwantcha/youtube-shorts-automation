@@ -75,8 +75,24 @@ def test_presentation_requires_completed_video_and_dispatches_without_publishing
     monkeypatch.setattr(service, "prepare_presentation", prepare)
     monkeypatch.setattr(service, "publish", publish)
     assert client.post(path, headers=headers).status_code == 202
-    prepare.assert_called_once_with(job["id"])
+    prepare.assert_called_once_with(job["id"], None)
     publish.assert_not_called()
+
+
+def test_custom_thumbnail_validation_and_dispatch(app, monkeypatch):
+    client = app.test_client()
+    service = app.extensions["shorts_service"]
+    job = service.create({"script": "test"})
+    service.store.update(job["id"], {"status": "approved", "artifacts": {"video": {"name": "video.mp4"}}})
+    path = f"/api/jobs/{job['id']}/presentation"
+    headers = auth(client)
+    prepare = Mock()
+    monkeypatch.setattr(service, "prepare_presentation", prepare)
+    for title in [None, "  ", "a" * 101, 42]:
+        assert client.post(path, json={"thumbnail_title": title}, headers=headers).status_code == 400
+    assert client.post(path, json={"thumbnail_title": " 직접 쓴 문구 "}, headers=headers).status_code == 202
+    prepare.assert_called_once_with(job["id"], "직접 쓴 문구")
+    assert client.post(path, json={"thumbnail_title": "또 다른 문구"}, headers=headers).status_code == 409
 
 
 def test_artifact_path_traversal_denied(app):
@@ -166,7 +182,7 @@ def test_one_click_auto_produces_video_and_reuses_daily_job(app, monkeypatch, tm
     assert job["quality"]["music_mood"] == "tense"
     assert job["quality"]["captions"]["cards"] > 0
     assert client.get(f"/api/jobs/{job['id']}/artifacts/video").status_code == 200
-    again = client.post("/api/jobs/auto", json={}, headers=auth(client))
+    again = client.post("/api/jobs/auto", json={"subtitle_style": "minimal", "speed": 1.1}, headers=auth(client))
     assert again.json["id"] == job["id"]
     assert writer.call_count == reader.call_count == 1
     assert job["uploads"] == {}

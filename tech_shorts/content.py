@@ -180,17 +180,17 @@ def review_stock(*args, **kwargs):
 
 
 def search_backgrounds(queries, directory, count=5, *, settings=None, narration="", exclude_ids=()):
-    key, = require_env("PEXELS_API_KEY")
+    if not (os.getenv("PEXELS_API_KEY") or os.getenv("PIXABAY_API_KEY")):
+        require_env("PEXELS_API_KEY")
+    from . import stock
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     results, seen = [], set(exclude_ids)
     pending = list(queries)[:3]
     for query in pending:
-        response = requests.get("https://api.pexels.com/videos/search", headers={"Authorization": key},
-                                params={"query": query, "per_page": 12, "size": "large", "orientation": "portrait"}, timeout=30)
-        response.raise_for_status()
         candidates = []
-        for video in response.json().get("videos", []):
+        cache_dir = Path(settings.output) / "_stock_cache" if settings else directory / "_stock_cache"
+        for video in stock.search(query, narration, cache_dir):
             if video["id"] in seen or video.get("duration", 0) < 3:
                 continue
             files = [f for f in video.get("video_files", []) if f.get("file_type") == "video/mp4"
@@ -226,7 +226,7 @@ def search_backgrounds(queries, directory, count=5, *, settings=None, narration=
                     pending.append(retry.strip())
                 continue
         for video, file in candidates:
-            path = directory / f"pexels_{int(video['id'])}.mp4"
+            path = directory / f"{video.get('provider','pexels')}_{abs(int(video['id']))}.mp4"
             try:
                 download(file["link"], path)
                 inspect(path)
@@ -235,6 +235,8 @@ def search_backgrounds(queries, directory, count=5, *, settings=None, narration=
                 continue
             seen.add(video["id"])
             results.append(dict(path=str(path), id=video["id"], source_url=video.get("url", ""),
+                                provider=video.get("provider","pexels"), source_id=video.get("source_id",video["id"]),
+                                license_url=video.get("license_url",""),
                                 creator=(video.get("user") or {}).get("name", ""),
                                 relevance=choice.get("reason", "") if settings is not None else ""))
             if len(results) >= count:

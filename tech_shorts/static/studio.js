@@ -62,18 +62,26 @@ function renderPresentation(job){
   if(panel.dataset.signature!==signature){
     panel.dataset.signature=signature;panel.replaceChildren();
     for(const title of job.title_suggestions||[]){const b=node("button",title,"title-choice");b.type="button";
-      b.addEventListener("click",()=>{$("publish-title").value=title;});panel.append(b);}
+      b.addEventListener("click",()=>{$("publish-title").value=title;$("thumbnail-title").value=title;});panel.append(b);}
   }
   const ready=Boolean(job.artifacts.thumbnail), img=$("publish-thumbnail");img.hidden=!ready;
   const link=$("thumbnail-download");link.hidden=!ready;
-  if(ready){const url=artifactURL(job,"thumbnail");if(img.getAttribute("src")!==url)img.src=url;link.href=url+"?download=1";}
+  if(ready){const url=artifactURL(job,"thumbnail")+"?v="+encodeURIComponent(job.artifacts.thumbnail.name||job.thumbnail_title||"");if(img.getAttribute("src")!==url)img.src=url;link.href=url+"&download=1";}
   const pending=["queued","running"].includes(job.presentation_status);
-  $("prepare-presentation").disabled=pending||(job.presentation_status==="ready"&&Boolean(job.cover_intro_seconds));
-  $("prepare-presentation").textContent=pending?"제목·썸네일 제작 중…":job.cover_intro_seconds?"0.5초 표지 적용 완료":"추천 제목·썸네일 및 0.5초 표지 적용";
+  $("apply-thumbnail").disabled=pending;
+  $("prepare-presentation").disabled=pending||(job.presentation_status==="ready"&&!job.cover_intro_seconds);
+  $("prepare-presentation").textContent=pending?"제목·썸네일 제작 중…":job.cover_intro_seconds?"기존 영상의 0.5초 표지 제거":"추천 제목·썸네일 준비";
   $("presentation-info").textContent=job.presentation_error|| (pending?job.presentation_progress||"제목·썸네일 제작 중…":ready?`썸네일 문구: ${job.thumbnail_title||""}`:"완성된 대본으로 제목 3개와 세로 썸네일을 만듭니다. 제목 생성에는 API 사용료가 발생합니다.");
   $("presentation-info").className=job.presentation_error?"error":"hint";
 }
 function openPublishAssets(job){openPublish(job);}
+$("apply-thumbnail").addEventListener("click",async()=>{
+  const title=$("thumbnail-title").value.trim(), b=$("apply-thumbnail");
+  if(!title){publishNotice("썸네일 문구를 입력해주세요.",true);return;}
+  b.disabled=true;
+  try{await api(`/api/jobs/${$("publish-dialog").dataset.jobId}/presentation`,{method:"POST",body:JSON.stringify({thumbnail_title:title})});publishNotice("입력한 문구로 썸네일을 제작하고 있습니다.");await refresh();}
+  catch(err){publishNotice(err.message,true);b.disabled=false;}
+});
 $("prepare-presentation").addEventListener("click",async()=>{
   const b=$("prepare-presentation");b.disabled=true;
   try{await api(`/api/jobs/${$("publish-dialog").dataset.jobId}/presentation`,{method:"POST"});b.textContent="제목·썸네일 제작 중…";}
@@ -86,6 +94,7 @@ function publishNotice(message,error=false){
 function openPublish(job){
   ++creatorRequest;creatorLoading=false;
   $("publish-dialog").dataset.jobId=job.id;$("publish-title").value=job.title||job.inputs.topic||"오늘의 숏츠";
+  $("thumbnail-title").value=job.thumbnail_title||job.title_suggestions?.[0]||"";
   $("publish-description").value=(job.script||"")+"\n\nAI 음성을 사용한 영상입니다. #Shorts";
   $("tiktok-account").textContent="";$("tiktok-privacy").replaceChildren(new Option("계정 조회 후 공개 범위 선택",""));
   document.querySelectorAll('input[name="platform"]').forEach(e=>{e.checked=false;e.disabled=!config.connections[e.value];});
@@ -125,7 +134,7 @@ $("publish-form").addEventListener("submit",async(e)=>{
   $("publish-dialog").close();notice("게시 작업을 시작했습니다.");
   try{await refresh();}catch(err){notice(`게시 요청은 접수됐지만 상태 조회에 실패했습니다: ${err.message}`,true);}
 });
-$("create-form").addEventListener("submit",async(e)=>{e.preventDefault();if(!$("automatic").checked&&(!$("script").value.trim()||!$("script-reviewed").checked)){notice("대본을 작성하거나 생성한 뒤 검토 확인란을 체크해주세요.",true);return;}const b=$("create-button");b.disabled=true;try{const job=await api("/api/jobs",{method:"POST",body:JSON.stringify({category:$("category").value,topic:$("topic").value,notes:$("notes").value,script:$("automatic").checked?"":$("script").value,bgm:$("bgm").checked,subtitle_style:$("subtitle-style").value,tts_provider:$("tts-provider").value,voice:$("voice").value,speed:Number($("speed").value),background_queries:$("queries").value.split(",").map(s=>s.trim()).filter(Boolean)})});selected=job.id;notice("제작을 시작했습니다. 진행 상황을 오른쪽에서 확인하세요.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
+$("create-form").addEventListener("submit",async(e)=>{e.preventDefault();if(!$("automatic").checked&&(!$("script").value.trim()||!$("script-reviewed").checked)){notice("대본을 작성하거나 생성한 뒤 검토 확인란을 체크해주세요.",true);return;}const b=$("create-button");b.disabled=true;try{const job=await api("/api/jobs",{method:"POST",body:JSON.stringify({category:$("category").value,topic:$("topic").value,notes:$("notes").value,script:$("automatic").checked?"":$("script").value,bgm:$("bgm").checked,subtitle_style:$("subtitle-style").value,tts_provider:$("tts-provider").value,...voiceOptions(),bgm_level:$("bgm-level").value,visual_style:"mixed",speed:Number($("speed").value),background_queries:$("queries").value.split(",").map(s=>s.trim()).filter(Boolean)})});selected=job.id;notice("제작을 시작했습니다. 진행 상황을 오른쪽에서 확인하세요.");await refresh();}catch(err){notice(err.message,true);}finally{b.disabled=false;}});
 $("refresh-button").addEventListener("click",()=>refresh().catch(e=>notice(e.message,true)));
 let sourceRequest = 0, trendRequest = 0, chosenSources = [], cancelSource = null;
 async function loadTrends(){
@@ -183,13 +192,32 @@ async function loadTrends(){
   }catch(e){if(requestId===trendRequest)notice(e.message,true);}finally{if(requestId===trendRequest){b.disabled=false;b.textContent="추천 주제 10개 새로고침 ↻";}}
 }
 $("trend-button").addEventListener("click",loadTrends);
-function updateVoice(){
-  const provider=$("tts-provider").value;
+let voiceRequest=0, voiceLoading=false, voiceProvider="openai";
+const rememberedVoices={};
+function voiceOptions(){
+  if(voiceLoading)throw new Error("음성 목록을 불러오는 중입니다. 잠시 기다려주세요.");
+  if(!$("voice").value)throw new Error("목소리를 선택해주세요. 음성 목록을 다시 불러오거나 서비스를 변경해주세요.");
+  return voiceProvider==="elevenlabs"?{voice:config.defaults.voice||"onyx",elevenlabs_voice_id:$("voice").value}:{voice:$("voice").value,elevenlabs_voice_id:""};
+}
+async function updateVoice(){
+  const request=++voiceRequest,provider=$("tts-provider").value;
+  if($("voice").value)rememberedVoices[voiceProvider]=$("voice").value;
+  voiceLoading=true;$("voice").disabled=true;$("voice-info").textContent="음성 목록을 불러오는 중…";
   const eleven=provider==="elevenlabs"||(provider==="auto"&&config.connections.elevenlabs);
-  $("voice").disabled=eleven;
   for(const option of $("speed").options)option.disabled=eleven&&(Number(option.value)<0.7||Number(option.value)>1.2);
   if(eleven&&Number($("speed").value)>1.2)$("speed").value="1.2";
+  try{
+    const data=await api(`/api/voices?provider=${encodeURIComponent(provider)}`);
+    if(request!==voiceRequest)return;
+    voiceProvider=data.provider;
+    $("voice").replaceChildren(...data.voices.map(v=>new Option(v.name,v.id)));
+    const preferred=rememberedVoices[data.provider]||data.default;
+    $("voice").value=data.voices.some(v=>v.id===preferred)?preferred:data.voices[0]?.id||"";
+    $("voice-info").textContent=`${data.provider==="elevenlabs"?"ElevenLabs":"OpenAI"} · ${data.voices.length}개 목소리 중 선택한 음성으로 제작합니다.`;
+  }catch(e){if(request===voiceRequest){$("voice").replaceChildren(new Option("목록 조회 실패 — 다시 불러오기", ""));$("voice-info").textContent=e.message;}}
+  finally{if(request===voiceRequest){voiceLoading=false;$("voice").disabled=false;}}
 }
+$("reload-voices").addEventListener("click",updateVoice);
 $("tts-provider").addEventListener("change",updateVoice);
 async function init(){try{config=await api("/api/config");csrf=config.csrf;$("category").replaceChildren(...config.categories.map(c=>new Option(c.label,c.id)));$("category").value=config.defaults.category;$("category").disabled=false;$("auto-create-button").disabled=false;const panel=$("connections");for(const [name,ready] of Object.entries(config.connections)){const el=node("div",name==="openai"?"OpenAI":name==="pexels"?"Pexels":name,"connection"+(ready?" ready":""));el.append(node("small",ready?"설정됨":"미설정"));panel.append(el);}$("voice").value=config.defaults.voice;$("speed").value=String(config.defaults.speed);$("tts-provider").value=config.defaults.tts_provider;updateVoice();await refresh();await loadTrends();}catch(e){notice(e.message,true);}}
 init();setInterval(()=>{if(!document.hidden)refresh().catch(e=>notice(e.message,true));},4000);
@@ -213,7 +241,7 @@ $("auto-create-button").addEventListener("click", async()=>{
   notice("추천 주제를 선정하고 기사 자료를 수집하고 있습니다…");
   try {
     const job=await api("/api/jobs/auto", {method:"POST",body:JSON.stringify({
-      category:$("category").value,tts_provider:$("tts-provider").value,voice:$("voice").value,speed:Number($("speed").value),
+      category:$("category").value,tts_provider:$("tts-provider").value,...voiceOptions(),bgm_level:$("bgm-level").value,visual_style:"mixed",speed:Number($("speed").value),
       bgm:$("bgm").checked,subtitle_style:$("subtitle-style").value
     })});
     selected=job.id; showJob(job);

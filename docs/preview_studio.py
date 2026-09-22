@@ -18,7 +18,7 @@ def main():
     settings = Settings(output=root / "output" / "docs-preview")
     # Never load .env or connect to real services in the documentation preview.
     for name in tuple(os.environ):
-        if name.startswith(("YOUTUBE_", "TIKTOK_", "INSTAGRAM_", "GMAIL_", "OPENAI_", "ELEVENLABS_", "PEXELS_")):
+        if name.startswith(("YOUTUBE_", "TIKTOK_", "INSTAGRAM_", "GMAIL_", "OPENAI_", "ELEVENLABS_", "PEXELS_", "PIXABAY_")):
             os.environ.pop(name)
     app = create_app(settings)
     service = app.extensions["shorts_service"]

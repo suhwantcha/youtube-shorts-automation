@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 import shutil
+import re
 
 from . import content, media, subtitles
 from .artifacts import Artifacts
@@ -14,6 +15,8 @@ def validate_inputs(data, allow_local=False):
     if not isinstance(data, dict):
         raise ValueError("JSON 객체가 필요합니다.")
     result = {}
+    from .identity import STYLE
+    result["visual_identity"] = STYLE
     from .topics import category_info
     result["category"] = category_info(data.get("category", "it"))["id"]
     limits = {"topic": 200, "notes": 75000, "script": 3000}
@@ -28,8 +31,18 @@ def validate_inputs(data, allow_local=False):
     if result["tts_provider"] not in {"auto", "openai", "elevenlabs"}:
         raise ValueError("지원하지 않는 음성 서비스입니다.")
     result["voice"] = data.get("voice", "onyx")
-    if result["voice"] not in {"onyx", "nova", "coral", "alloy", "ash", "sage", "shimmer", "marin", "cedar"}:
+    from .voices import OPENAI_VOICES
+    if result["voice"] not in OPENAI_VOICES:
         raise ValueError("지원하지 않는 음성입니다.")
+    result["elevenlabs_voice_id"] = data.get("elevenlabs_voice_id", "")
+    if not isinstance(result["elevenlabs_voice_id"], str) or (result["elevenlabs_voice_id"] and not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", result["elevenlabs_voice_id"])):
+        raise ValueError("ElevenLabs 음성 ID가 올바르지 않습니다.")
+    result["bgm_level"] = data.get("bgm_level", "normal")
+    if result["bgm_level"] not in {"quiet", "normal", "strong"}:
+        raise ValueError("지원하지 않는 배경음악 음량입니다.")
+    result["visual_style"] = data.get("visual_style", "mixed")
+    if result["visual_style"] not in {"mixed", "stock"}:
+        raise ValueError("지원하지 않는 영상 구성입니다.")
     try:
         result["speed"] = float(data.get("speed", 1.2))
     except (TypeError, ValueError):
@@ -68,6 +81,7 @@ class Pipeline:
         work = self.artifacts.directory(job_id)
         inputs = job["inputs"]
         settings = replace(self.settings, voice=inputs["voice"], speed=inputs["speed"],
+                           elevenlabs_voice_id=inputs.get("elevenlabs_voice_id") or self.settings.elevenlabs_voice_id,
                            tts_provider=inputs.get("tts_provider", self.settings.tts_provider))
         saved = dict(job.get("artifacts", {}))
 
@@ -142,20 +156,37 @@ class Pipeline:
                     media.inspect(path)
             else:
                 beats = subtitles.scene_beats(srt.read_text(encoding="utf-8-sig"), duration)
+                if inputs.get("visual_identity"):
+                    from .identity import question_beats
+                    beats = question_beats(srt.read_text(encoding="utf-8-sig"), duration, (editorial or {}).get("mid_question", ""))
                 # Keep paid planning and downloaded clips across render retries.
                 scene_queries = job.get("scene_queries")
                 if not scene_queries or len(scene_queries) != len(beats):
                     scene_queries = content.plan_scene_queries(beats, settings)
                     self.store.update(job_id, {"scene_queries": scene_queries})
+                directions = job.get("visual_directions")
+                if inputs.get("visual_style", "stock") == "mixed" and (not directions or len(directions) != len(beats)):
+                    from .storyboard import plan
+                    self.store.update(job_id, {"stage": "대사에 맞춘 시각 연출 구성"})
+                    directions = plan(beats, settings)
+                    self.store.update(job_id, {"visual_directions": directions})
                 backgrounds = []
                 for index, (beat, query) in enumerate(zip(beats, scene_queries)):
                     self.store.update(job_id, {"stage": f"장면 영상 준비 {index+1}/{len(beats)}"})
                     key = f"background_{index}"
                     path = cached(key)
                     if path is None:
-                        found = content.search_backgrounds([query], work / "backgrounds", count=1,
-                            settings=settings, narration=beat["text"],
-                            exclude_ids=[s["id"] for s in sources if "id" in s])[0]
+                        direction = directions[index] if directions else {"kind": "stock"}
+                        if beat.get("signature") == "question":
+                            from .identity import question_scene
+                            found = question_scene(work / "backgrounds", beat["end"]-beat["start"], settings)
+                        elif direction["kind"] != "stock":
+                            from .storyboard import render
+                            found = render(direction, work / "backgrounds", beat["end"]-beat["start"], settings)
+                        else:
+                            found = content.search_backgrounds([query], work / "backgrounds", count=1,
+                                settings=settings, narration=beat["text"],
+                                exclude_ids=[s["id"] for s in sources if "id" in s])[0]
                         path = work / f"{key}.mp4"
                         shutil.copyfile(found["path"], path)
                         save(key, path)
@@ -180,13 +211,15 @@ class Pipeline:
             video = work / "video.mp4"
             report = media.render(audio, backgrounds, srt, video, width=settings.width, height=settings.height, fps=settings.fps, scene_durations=scene_durations,
                                   subtitle_style=inputs.get("subtitle_style", "focus"),
-                                  bgm=inputs.get("bgm", True), bgm_path=settings.bgm_path,
+                                  bgm=inputs.get("bgm", True), bgm_path=settings.bgm_path, bgm_level=inputs.get("bgm_level", "normal"),
                                   music_mood=(editorial or {}).get("music_mood", "neutral"), progress=render_progress)
             cards = subtitles.display_cues(srt.read_text(encoding="utf-8-sig"))
             report["captions"] = {"cards": len(cards),
                 "under_one_second": sum(c["end"]-c["start"] < 1 for c in cards),
                 "minimum_seconds": round(min(c["end"]-c["start"] for c in cards), 3)}
             report["music_mood"] = (editorial or {}).get("music_mood", "neutral")
+            report["bgm_level"] = inputs.get("bgm_level", "normal")
+            report["visual_style"] = inputs.get("visual_style", "stock")
             save("video", video)
             saved.pop("body_video", None)
             saved.pop("body_subtitles", None)

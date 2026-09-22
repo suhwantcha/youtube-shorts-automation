@@ -13,7 +13,7 @@ Automation clients authenticate with `Authorization: Bearer <SHORTS_API_TOKEN>`.
 | GET | `/api/trends?category=science` | Up to ten recent news or popular community articles for the selected field |
 | POST | `/api/source` | Extract article text from `{ "url": "https://..." }` |
 | POST | `/api/draft` | Generate and review a draft from `topic` and `notes`; no narration or video |
-| POST | `/api/jobs/<id>/presentation` | Prepare three title suggestions and a portrait thumbnail for an existing video; adds a 0.5-second cover without regenerating narration or publishing |
+| POST | `/api/jobs/<id>/presentation` | Prepare three title suggestions and a downloadable JPEG thumbnail; restore preserved originals for legacy cover-intro jobs |
 | GET | `/api/jobs` | List recent jobs |
 | POST | `/api/jobs` | Create and dispatch a video production job |
 | POST | `/api/jobs/auto` | Select a readable trending article and produce a video for review |
@@ -67,7 +67,7 @@ Automatic script length is checked by character count: 550-900 characters are re
 
 Background music uses a locally synthesized instrumental with speech-driven ducking. Set server-side `BGM_PATH` for a custom audio file, or send `bgm: false` for narration only.
 
-`POST /api/jobs/auto` accepts optional `category`, `voice`, `speed`, `tts_provider`, `bgm`, and `subtitle_style` settings. It selects an accessible trending article, then dispatches the same production pipeline as manual topic selection. One automatic job is reused per field per Asia/Seoul calendar day; repeated requests return that job without changing its original settings or regenerating completed work. Failed jobs can use the retry endpoint.
+`POST /api/jobs/auto` accepts the production settings below, including voice, music level and visual style. Requests with the same normalized settings and field on the same Asia/Seoul date reuse the existing job. Changing settings creates a new job; retries reuse cached production artifacts.
 
 ## Job Results
 
@@ -104,4 +104,18 @@ News searches use English keywords and the en-US market for both relevance and n
 
 New productions prepare assets before entering review. Existing jobs can call `POST /api/jobs/<id>/presentation` and poll the job for `presentation_status` (`running`, `ready`, or `failed`), `presentation_error`, `title_suggestions` and `thumbnail_title`. The response is `202`; completion is asynchronous. Successful titles and images are reused on repeated calls. The `thumbnail` artifact is a 1080 x 1920 JPEG available through the existing artifact endpoint. Posting-title edits do not alter the cover text. Asset failure leaves video state intact.
 
-The generated image is prepended as a silent 0.5-second shot. `cover_intro_seconds` is `0.5` after successful composition; `duration` and `quality` describe the final video. `body_video` and `body_subtitles` preserve originals. `video` and `subtitles` point to the new MP4 and shifted SRT. Scene-plan times remain relative to the body; the manifest records `body_timeline_offset_seconds`. Repeating preparation does not duplicate the intro. Failures preserve the original artifact references. Existing uploaded posts are not replaced. Separate YouTube thumbnail upload is no longer attempted; users select the opening frame on their platform.
+The generated thumbnail is a separate downloadable 1080 × 1920 JPEG. It is never prepended to new videos, so narration and subtitle timing remain unchanged. For a legacy job with a 0.5-second intro, use the presentation button to restore its preserved original video and subtitles without re-encoding. Previously published posts are not modified.
+
+## Voice, music and visual direction
+
+`GET /api/voices?provider=auto|openai|elevenlabs` returns `provider`, `voices: [{id,name}]`, and `default`. OpenAI choices reflect the configured TTS model. ElevenLabs returns up to 100 account voices plus the configured default; API credentials remain server-side.
+
+Production accepts `elevenlabs_voice_id` (optional account voice ID), `bgm_level` (`quiet`, `normal`, `strong`; default `normal`), `visual_style` (`mixed`, `stock`; default `mixed`). Selected voice IDs are persisted with the job and passed to synthesis. The normal music bed is approximately 7 dB above the former quiet level before speech ducking; narration timing is unchanged.
+
+Mixed mode plans stock footage, two-sided comparisons, ordered processes and animated emphasis from each narration beat. Graphic phrases must be verbatim excerpts of that beat; invalid plans fall back to stock selection. Directions and scene sources are persisted internally for retries. The Studio automatically uses mixed mode without direction inputs or a scene-review step. Graphics preserve the subtitle area and do not change word timing. This feature does not guarantee originality or monetization eligibility.
+
+## Automatic visual identity
+
+New validated jobs record `visual_identity: mint-orbit-v1`. Editorial output includes `mid_question`; it is canonicalized like the final narration. Production maps it onto subtitle timing and creates one `scene_plan` entry with `signature: question` and a source `visual_type: question`. The visual interval replaces existing frames without extending the audio timeline. Jobs created before this version retain their cached scene layout on retry.
+
+`/api/config` exposes only a boolean `connections.pixabay`. Optional `PIXABAY_API_KEY` stays server-side. Stock sources include `provider`, `source_id`, `source_url`, `creator` and `license_url`. Routing is stable per narration/query, with Pexels/Pixabay first-choice weights of 70/30 when both are configured. Search failure or unusable results permit fallback to the other provider; relevance filtering still applies.

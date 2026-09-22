@@ -191,9 +191,15 @@ def generate(topic, notes, settings, *, dossier=None, previous=None, category="i
         if required <= covered and review.get("missing") == [] and review.get("unsupported") == [] and all(review.get(k) is True for k in ("names_ok", "ending_ok", "jargon_ok", "story_ok", "readability_ok")) and review.get("unexplained_terms") == []:
             queries = data.get("background_queries", [])
             queries = [q.strip()[:80] for q in queries if isinstance(q,str) and q.strip()][:3] if isinstance(queries,list) else []
+            from .content import clean_script
+            middle = data.get("mid_question", "")
+            for name in dossier["names"]:
+                for alias in name["aliases"]:
+                    middle = middle.replace(alias, name["canonical"])
             return dict(title=str(data.get("title") or topic)[:100], script=script,
                         background_queries=queries or [category_config["english_query"]], brief=dossier,
                         editorial_review=review, summary=summary, engagement=engagement,
+                        mid_question=clean_script(middle),
                         music_mood=data.get("music_mood") if data.get("music_mood") in {"neutral", "tense", "bright"} else "neutral")
         audit_issue = json.dumps({"missing": sorted(required-covered), "unsupported":review.get("unsupported"), "names_ok":review.get("names_ok"), "ending_ok":review.get("ending_ok"), "jargon_ok":review.get("jargon_ok"), "unexplained_terms":review.get("unexplained_terms"), "feedback":review.get("feedback")},ensure_ascii=False)
         audit_issue = json.dumps({**json.loads(audit_issue), "story_ok": review.get("story_ok"), "readability_ok": review.get("readability_ok")}, ensure_ascii=False)

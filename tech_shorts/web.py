@@ -123,11 +123,17 @@ def create_app(settings=None, store=None):
         return jsonify(csrf=csrf(), connections={
             "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
             "openai": bool(os.getenv("OPENAI_API_KEY")), "pexels": bool(os.getenv("PEXELS_API_KEY")),
+            "pixabay": bool(os.getenv("PIXABAY_API_KEY")),
             "youtube": all(os.getenv(k) for k in ("YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN")),
             "tiktok": bool(os.getenv("TIKTOK_ACCESS_TOKEN")),
             "instagram": all(os.getenv(k) for k in ("INSTAGRAM_ACCESS_TOKEN", "INSTAGRAM_ACCOUNT_ID", "META_API_VERSION")) and bool(settings.bucket),
             "gmail": all(os.getenv(k) for k in ("ADMIN_EMAIL", "GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN")) and bool(settings.api_token and settings.base_url),
         }, backend=settings.backend, categories=category_choices(), defaults={"category": "it", "voice": settings.voice, "speed": settings.speed, "tts_provider": settings.tts_provider})
+
+    @app.get("/api/voices")
+    def voices():
+        from .voices import choices
+        return jsonify(choices(request.args.get("provider", "auto"), settings))
 
     @app.get("/api/trends")
     def trends():
@@ -201,9 +207,18 @@ def create_app(settings=None, store=None):
     @app.post("/api/jobs/<job_id>/presentation")
     def presentation(job_id):
         job = service.store.get(job_id)
+        data = body() if request.data else {}
+        title = data.get("thumbnail_title")
+        if "thumbnail_title" in data:
+            if not isinstance(title, str) or not 1 <= len(title.strip()) <= 100:
+                raise ValueError("썸네일 문구는 1~100자로 입력해주세요.")
+            title = " ".join(title.split())
         if "video" not in job.get("artifacts", {}) or job["status"] in {"running", "queued", "publishing"}:
             raise Conflict("영상 제작과 진행 중인 게시가 끝난 뒤 생성해주세요.")
-        dispatch(service.prepare_presentation, job_id)
+        if job.get("presentation_status") in {"queued", "running"}:
+            raise Conflict("썸네일 제작이 끝난 뒤 다시 적용해주세요.")
+        service.store.update(job_id, {"presentation_status": "queued", "presentation_error": None})
+        dispatch(service.prepare_presentation, job_id, title)
         return jsonify(status="queued", id=job_id), 202
 
     @app.post("/api/jobs/<job_id>/refresh-uploads")

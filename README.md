@@ -1,12 +1,12 @@
 # Tech Shorts Studio
 
-Choose one of 17 fields, discover recent news or popular community articles, and turn a selected story into a vertical video with Korean narration and subtitles. Review the finished video, approve it, and publish it to your chosen platforms.
+A local-first production studio for Korean narrated Shorts: discover articles, review source-grounded scripts, choose a voice, render portrait videos, and approve them before publishing. The Flask UI supports YouTube Shorts, TikTok, and Instagram Reels.
 
 ![Studio: topic discovery and video review](docs/images/studio-overview.jpg)
 
 ![Publishing dialog: suggested titles and portrait thumbnail](docs/images/studio-publish.jpg)
 
-These are captures of the real Korean-language Studio with isolated demo content and disconnected accounts. They do not represent live news, production duration, or a successful platform upload.
+These screenshots illustrate an earlier version of the real Korean-language Studio; some controls have since changed. They were captured with isolated demo content and disconnected accounts. They do not represent live news, production duration, or a successful platform upload.
 
 ## Features
 
@@ -19,18 +19,20 @@ These are captures of the real Korean-language Studio with isolated demo content
 - **Speech-timed scenes:** Group timestamped subtitle phrases into sentence beats and shots up to 4.5 seconds. Plan varied, concrete visual queries with story context and exclude clip IDs already used in the video. Scene plans and downloaded clips are reused on retry.
 - **Visual relevance:** OpenAI compares up to six candidate thumbnails with each narration beat before downloading a clip. If none fits, it can suggest alternative searches, with up to three searches per scene. If no suitable clip is found, OpenAI drafts a narration-grounded concept card and independently checks its text; the renderer creates a gently animated explanatory graphic. Production stops if the graphic fails validation. Unrelated generic footage is not substituted. Thumbnail review is model-based and does not inspect every video frame. Footage is illustrative, not verified imagery of the actual product. Automatic selection requires an image-capable script model.
 - **Subtitle designs:** Choose Focus (mint accents) or Minimal (white). Both use large 96px captions in the 1080p design space, up to three lines per card, gentle fades, and safe lower-screen margins. A global layout balances adjacent fragments into readable cards without crossing long pauses. Word times inside each recognition phrase are estimated by character weight for display only; downloadable SRT timing is preserved. Downloadable SRT files retain recognition timing and plain text.
-- **Quiet background music:** An optional, locally synthesized instrumental bed is enabled by default. The editor chooses a neutral, tense or bright mood; a full-length arrangement varies voicing, rhythm and intensity instead of repeating an eight-second loop. It is mixed roughly 22 dB below separately normalized narration and automatically ducked further during speech, with short entrance and exit fades. Disable it in the Studio or send `bgm: false` to the API. Set server-side `BGM_PATH` to use your own suitable audio file.
+- **Adjustable background music:** An optional, locally synthesized instrumental bed is enabled by default. The editor chooses a neutral, tense or bright mood; a full-length arrangement varies voicing, rhythm and intensity instead of repeating an eight-second loop. Choose Quiet, Normal (default), or Strong. The music gain is 0.08, 0.18, or 0.28 after separate loudness normalization; speech-driven ducking lowers it further, with short entrance and exit fades. Disable it in the Studio or send `bgm: false` to the API. Set server-side `BGM_PATH` to use your own suitable audio file.
 - **Script-based pacing:** Default narration speed is 1.2x. Length is checked using script characters only: 550-900 characters are recommended, with up to 1,400 allowed to retain the full material-fact checklist. Actual audio duration is used for subtitle timing and muxing, not for paid script or narration regeneration. Content completeness takes priority over a fixed running time. The renderer supports videos up to 180 seconds.
 - **Audience questions:** Include one short curiosity question at a meaningful narrative transition and a brief closing question or reflection without a repeated factual recap. The next section answers the middle question; the closing question encourages a useful action or thought. At most three questions, including an optional opening question, are allowed in a script.
 - **Narration delivery:** Script prompts favor one idea per sentence and natural pauses. OpenAI delivery instructions emphasize important terms and deliberate pacing; ElevenLabs uses a stability setting of 0.4.
 - **Rendering progress:** The Studio reports music preparation, each scene and its encoding percentage, final composition percentage, and output validation. Render failures retain FFmpeg diagnostics with input URLs removed. Retrying reuses saved narration, subtitles and downloaded backgrounds; encoding resumes by rebuilding the render.
 - **Video output:** Use portrait backgrounds at Full HD or higher for each speech beat, and render at 1080 x 1920 and 30 fps with Lanczos scaling, CRF 18 encoding, bold subtitles, and loudness normalization.
 - **Review and publishing:** Preview videos, download MP4 and subtitle files, approve or reject jobs, and publish to YouTube Shorts, TikTok, or Instagram Reels. Each platform requires its own credentials.
-- **Suggested posting titles:** Each new video gets three Korean titles grounded in its final script. Click one in the publishing dialog to copy it into the editable title field. Successful suggestions are cached across retries. This adds one language-model request to production.
-- **Portrait thumbnails:** Automatically compose a 1080 x 1920 JPEG from existing footage with Korean typography, a contrast gradient and a category label. This is local image composition, not a separately generated AI photograph. The first suggested title is used as cover text; choosing a different posting title does not change the image.
-- **Existing videos:** Open “제목·썸네일 보기” (titles and thumbnail) and select “추천 제목·썸네일 생성” to prepare these assets without regenerating narration or scenes (the final MP4 is re-encoded to add the cover). Failures preserve the finished video and allow asset retries.
-- **Half-second cover intro:** The generated thumbnail is inserted as a silent 0.5-second opening shot. The complete original picture and audio follow together; downloadable SRT timestamps shift by 0.5 seconds. Originals remain saved, and repeated asset preparation never adds a second intro. No separate YouTube thumbnail upload is attempted. Select the opening frame using the platform thumbnail controls; inserting it does not automatically set the chosen platform thumbnail. Previously uploaded videos are not changed or reuploaded.
-- **Local storage:** SQLite and local files are the defaults. GCP persistence is optional.
+- **Shorts-ready thumbnail hooks:** Each new video gets three distinct Korean hooks grounded in the final script. Suggestions favor provocative wording, curiosity, surprising contrasts, and concrete stakes without inventing facts. The prompt prefers 8–24 characters (60 maximum). Click a suggestion to fill both the posting-title and thumbnail-text fields. Successful suggestions are cached across retries; initial generation adds one language-model request.
+- **Portrait thumbnails:** Automatically compose a 1080 x 1920 JPEG from existing footage with Korean typography, a contrast gradient and a category label. This is local image composition, not a separately generated AI photograph. The first suggestion is the initial cover text. Select another suggestion or write your own text (1–100 characters), then click **Apply to thumbnail** to rebuild the JPEG. Manual edits require no language-model request. The posting title remains independently editable; changing that field alone does not change the image.
+- **Existing videos:** Open **View titles and thumbnail** to prepare missing assets or apply custom thumbnail text without regenerating narration, scenes, or the final MP4. Failures preserve the finished video and allow asset retries.
+
+The generated thumbnail is a separate downloadable 1080 × 1920 JPEG. It is never prepended to new videos, so narration and subtitle timing remain unchanged. For a legacy job with a 0.5-second intro, use the presentation button to restore its preserved original video and subtitles without re-encoding. Previously published posts are not modified.
+
+SQLite and local files are the defaults; GCP persistence is optional.
 
 ## Quick Start on Windows
 
@@ -55,12 +57,12 @@ The setup script copies `.env.example` only when `.env` does not exist. Add miss
 
 Open the [local Studio](http://127.0.0.1:8080) in your browser. The Studio interface and generated narration are currently in Korean.
 
-1. Select a field to load up to ten suggested articles. Choose an article, or use “선택 분야의 추천 영상 자동 제작” to select a readable article and produce the video automatically.
+1. Select a field to load up to ten suggested articles. Choose an article, or use **Automatically produce a video for this field** to select a readable article and produce the video automatically.
 2. Review or edit the extracted article text. Selecting a new topic clears the previous script.
 3. Leave automatic completion enabled to generate, review, and revise the script through the configured APIs. To supply your own script, disable it and confirm the optional draft review.
-4. Choose the voice provider, reading speed, and subtitle design, then start production.
+4. Choose the voice provider and voice, reading speed, music level, and subtitle design, then start production.
 5. Review the finished video, subtitles, suggested titles and thumbnail. Download the files or approve the video before publishing.
-6. Open the publishing dialog, choose a suggested title or write your own, explicitly select platforms and privacy settings, then submit. Validation errors appear inside the dialog; upload results and warnings appear below the video.
+6. Open the publishing dialog. Select a suggested hook or enter custom thumbnail text and click **Apply to thumbnail**. Review the updated image and download its JPEG if needed. Edit the posting title separately, explicitly select platforms and privacy settings, then submit. Validation errors appear inside the dialog; upload results and warnings appear below the video.
 
 Script, narration, and subtitle generation incur API charges. Scene planning also incurs a language-model API charge. Additional footage searches and higher-quality encoding can increase production time and output file size.
 
@@ -77,7 +79,8 @@ ELEVENLABS_MODEL=eleven_multilingual_v2
 ```
 
 - `auto` selects ElevenLabs when its key is configured and OpenAI otherwise. Set `openai` or `elevenlabs` explicitly, or choose the provider in the Studio.
-- ElevenLabs uses the server-side `ELEVENLABS_VOICE_ID`. Replace it with a voice available to your account. The Onyx, Nova, and other named options in the Studio apply to OpenAI only.
+- Give the API key access to speech generation and **Voices: Read** (`voices_read`). A `401 missing_permissions` response means the key lacks the required endpoint permission; enable Voices read access in ElevenLabs Developers → API Keys, then click **Reload voices**. The Studio displays actionable errors for missing permissions, invalid authentication, access restrictions, rate limits, and connection failures.
+- Select an available ElevenLabs account voice in the Studio. `ELEVENLABS_VOICE_ID` remains the default. Switching to OpenAI loads its model-supported voice options.
 - ElevenLabs supports a reading speed of 0.7 to 1.2; the application defaults to 1.2. A failed request does not trigger automatic paid generation through another provider.
 - OpenAI credentials are still required for generated scripts and Whisper subtitles when using ElevenLabs narration.
 - Voice availability and API access depend on the credentials and subscription configured on the server.
@@ -101,7 +104,11 @@ tech_shorts/
   editorial.py    Source evidence, script composition, and automated review
   subtitles.py    Transcript alignment and caption design
   music.py        Instrumental synthesis and speech-driven music ducking
-  visuals.py      Narration-grounded concept graphics and motion
+  voices.py       Provider-specific voice catalogs and actionable API errors
+  storyboard.py   Sparse comparison/process/focus graphics and planning limits
+  identity.py     Middle-question visual signature
+  stock.py        Pexels/Pixabay routing and cached Pixabay searches
+  visuals.py      Narration-grounded fallback concept graphics and motion
   sources.py      Public article text extraction
   pipeline.py     Video production orchestration
   media.py        FFmpeg rendering and media validation
@@ -120,12 +127,12 @@ docs/API.md       API reference
 .\.venv\Scripts\python.exe -m tech_shorts doctor
 .\.venv\Scripts\python.exe -m tech_shorts list
 .\.venv\Scripts\python.exe -m pytest
-node --test tests/studio_publish.test.cjs
+node --test tests/studio*.test.cjs
 ```
 
 Install `requirements-dev.txt` if the test tools are missing. Tests include real FFmpeg rendering without calling paid external APIs.
 
-The `python -m tech_shorts auto` command and `POST /api/jobs/auto` endpoint provide unattended production. They automatically select a readable article and stop at the review stage. The Studio’s “선택 분야의 추천 영상 자동 제작” button runs this workflow using the selected voice, speed, music and subtitle settings. It reopens the same daily job for that field on repeated clicks to avoid duplicate production; use the existing retry button if it failed. Interactive topic selection remains available. See the [API reference](docs/API.md) for endpoints.
+The `python -m tech_shorts auto` command and `POST /api/jobs/auto` endpoint provide unattended production. They automatically select a readable article and stop at the review stage. The Studio’s **Automatically produce a video for this field** button runs this workflow using the selected voice, speed, music and subtitle settings. It reopens the same daily job for identical production options on repeated clicks to avoid duplicate production; use the existing retry button if it failed. Interactive topic selection remains available. See the [API reference](docs/API.md) for endpoints.
 
 ## Authentication and Secrets
 
@@ -150,3 +157,15 @@ A preview's “Client disconnected” log can simply mean the browser canceled a
 ## Reproducing the Screenshots
 
 Run `.\.venv\Scripts\python.exe docs/preview_studio.py` and open `http://127.0.0.1:8081`. This isolated preview skips `.env`, uses synthetic artwork, blocks POST requests and stores demo fixtures under ignored `output/docs-preview/`. It does not generate paid content or publish anything.
+
+## Creative direction and voice choices
+
+The Studio now offers provider-specific voice selection (OpenAI and available ElevenLabs account voices), three background-music levels, and mixed visual direction. Mixed mode prioritizes illustrative footage. Planned comparison, process, and focus graphics are optional and capped at two per video, at most one per six scenes, and 15% of the timed scene duration, with at least five footage scenes between them. Ordinary emphasis and takeaways should stay on footage. These limits apply to newly planned storyboard graphics; the middle-question signature and fallback concept graphics when stock searches fail are separate paths. Previously cached scene plans and finished videos are reused, not automatically revised. Visual direction is fully automatic: the system reads narration beats and chooses meaningful transitions without extra user input. The established script review and subtitle alignment are unchanged. Voice/music changes create a separate automatic job, while identical requests reuse the day's job.
+
+A consistent visual language is a starting point, not proof of human authorship. Review facts, develop a distinct editorial perspective and make meaningful creative decisions for each video. Merely changing templates or adding animation does not guarantee YouTube monetization. See [YouTube monetization policies](https://support.google.com/youtube/answer/1311392).
+
+## Channel signature and stock diversity
+
+New productions use the same navy/mint visual language across comparison, process and focus animations. The reviewed script's middle question is retained as metadata and located in the existing subtitles. A rotating mint orbit and question mark replace that visual interval exactly once; the opening/closing questions do not receive repeated bumpers. No extra narration, intro duration or subtitle shift is added. Imported scripts without a marker use a conservative middle-question detector; scripts without a middle question keep their original scene flow. Existing rendered videos are not modified automatically.
+
+Optionally set `PIXABAY_API_KEY` in your local `.env`. When both stock API keys are present, a stable hash routes about 70% of searches to Pexels first and 30% to Pixabay first; this is a first-choice routing ratio, not a guaranteed proportion of final shots. Empty/unusable responses or API failures try the other configured provider. Both sources use the same narration-relevance review. Pixabay requests use English terms and a 24-hour disk cache, per its [API documentation](https://pixabay.com/api/docs/). Provider, creator, original page and license links are retained with selected footage. Never commit `.env` or API credentials.

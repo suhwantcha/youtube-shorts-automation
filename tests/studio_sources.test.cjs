@@ -15,7 +15,7 @@ async function setup(read){
   const context=vm.createContext({$,node,notice(){},AbortController,setTimeout,clearTimeout,
     api:async(path,options)=>path.startsWith('/api/trends')?{topics}:read(options)});
   const source=fs.readFileSync('tech_shorts/static/studio.js','utf8');
-  vm.runInContext(source.slice(source.indexOf('let sourceRequest ='),source.indexOf('function updateVoice')),context);
+  vm.runInContext(source.slice(source.indexOf('let sourceRequest ='),source.indexOf('let voiceRequest=')),context);
   await vm.runInContext('loadTrends()',context);
   return {$,cards:$('trends').querySelectorAll(),statuses:$('trends').children.filter(n=>n.attrs.role==='status')};
 }

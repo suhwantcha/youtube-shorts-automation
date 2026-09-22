@@ -52,3 +52,22 @@ def test_arrangement_matches_duration_and_changes_between_phrases(tmp_path):
         data = stream.readframes(stream.getnframes())
     phrase_bytes = round(16 * 60 / 104 * rate) * 2
     assert data[:rate*2] != data[phrase_bytes:phrase_bytes+rate*2]
+
+
+def test_new_normal_music_is_louder_than_legacy_quiet(tmp_path):
+    voice, bed = tmp_path / "silence.wav", tmp_path / "tone.wav"
+    media.run(["-f","lavfi","-i","sine=frequency=220:duration=2",voice])
+    media.run(["-f","lavfi","-i","sine=frequency=997:duration=2",bed])
+    levels=[]
+    for level in ("quiet","normal","strong"):
+        output=tmp_path / f"{level}.wav"
+        music.mix(voice,bed,output,2,level)
+        with wave.open(str(output)) as stream:
+            rate=stream.getframerate()
+            data=struct.unpack("<"+"h"*stream.getnframes(),stream.readframes(stream.getnframes()))
+        samples=data[int(.5*rate):int(1.5*rate)]
+        real=sum(x*math.cos(2*math.pi*997*i/rate) for i,x in enumerate(samples))
+        imag=sum(x*math.sin(2*math.pi*997*i/rate) for i,x in enumerate(samples))
+        levels.append(math.hypot(real,imag)/len(samples))
+    assert levels[1] > levels[0]*2
+    assert levels[2] > levels[1]*1.4

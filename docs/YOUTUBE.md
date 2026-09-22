@@ -14,6 +14,6 @@ Playground default credentials revoke refresh tokens after 24 hours; use your ow
 
 If a new token works in a separate process but not in the server, check inherited terminal variables: `.env` does not overwrite existing environment values. In CMD, clear only the three variables with `set "YOUTUBE_CLIENT_ID="`, `set "YOUTUBE_CLIENT_SECRET="` and `set "YOUTUBE_REFRESH_TOKEN="`, then relaunch the server to load the file.
 
-OAuth verification and YouTube API audits are separate. Videos from unverified API projects created after July 28, 2020 can be restricted to private visibility. The Studio inserts its generated cover as the first 0.5 seconds of the video instead of uploading a separate thumbnail. Select this frame in the platform thumbnail controls when available.
+OAuth verification and YouTube API audits are separate. Videos from unverified API projects created after July 28, 2020 can be restricted to private visibility. Download the generated JPEG from the Studio and register it separately using the thumbnail controls available for your account and video format. The Studio does not prepend a cover or automatically upload a thumbnail.
 
 References: [OAuth authorization](https://developers.google.com/youtube/v3/guides/auth/server-side-web-apps), [token expiration](https://developers.google.com/identity/protocols/oauth2#expiration), [video upload restrictions](https://developers.google.com/youtube/v3/docs/videos/insert), [thumbnail API](https://developers.google.com/youtube/v3/docs/thumbnails/set).

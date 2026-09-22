@@ -50,15 +50,18 @@ def synthesize(output, duration=32, mood="neutral"):
         stream.writeframes(samples.tobytes())
 
 
-def mix(narration, music, output, duration):
+def mix(narration, music, output, duration, level="normal"):
     """Normalize separately, duck the quiet bed from speech, and preserve speech timing."""
     from .media import run
+    levels = {"quiet": 0.08, "normal": 0.18, "strong": 0.28}
+    if level not in levels:
+        raise ValueError("지원하지 않는 배경음악 음량입니다.")
     fade = min(.8, duration / 3)
     graph = (
         "[0:a]aresample=48000,loudnorm=I=-16:TP=-1.5:LRA=7,"
         "aresample=48000,asplit=2[voice][side];"
         "[1:a]aresample=48000,loudnorm=I=-16:TP=-1.5:LRA=7,"
-        "aresample=48000,volume=0.08,"
+        f"aresample=48000,volume={levels[level]},"
         f"afade=t=in:d={fade:.6f},afade=t=out:st={duration-fade:.6f}:d={fade:.6f}[bed];"
         "[bed][side]sidechaincompress=threshold=0.015:ratio=8:attack=15:release=250[ducked];"
         "[voice][ducked]amix=inputs=2:duration=first:normalize=0,"

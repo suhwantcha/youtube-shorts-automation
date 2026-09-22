@@ -31,7 +31,7 @@ def test_prepare_reuses_titles_and_thumbnail(service, approved_job, monkeypatch)
     for _ in range(2):
         result = service.prepare_presentation(approved_job["id"])
     assert titles.call_count == image.call_count == 1
-    assert intro.call_count == 1 and result["cover_intro_seconds"] == 0.5
+    assert intro.call_count == 0 and not result.get("cover_intro_seconds")
     assert result["presentation_status"] == "ready"
     assert result["status"] == "approved" and result["uploads"] == {}
     assert "thumbnail" in result["artifacts"]
@@ -46,15 +46,20 @@ def test_cover_failure_preserves_video_and_paid_titles(service, approved_job, mo
     assert result["status"] == "approved"
 
 
-def test_intro_failure_keeps_playable_original(service, approved_job, monkeypatch):
-    def cover(source, output, *args):
-        Image.new("RGB", (1080, 1920)).save(output)
-    monkeypatch.setattr(presentation, "create_thumbnail", cover)
-    monkeypatch.setattr(media, "prepend_cover", Mock(side_effect=media.MediaError("encoding failed")))
-    result = service.prepare_presentation(approved_job["id"])
-    assert result["presentation_status"] == "failed"
+def test_custom_thumbnail_skips_ai_and_persists_on_retry(service, approved_job, monkeypatch):
+    titles = Mock(side_effect=AssertionError("Manual copy must not call AI"))
+    monkeypatch.setattr(presentation, "suggest_titles", titles)
+    image = Mock(side_effect=lambda source, output, *args: Image.new("RGB", (1080, 1920)).save(output))
+    monkeypatch.setattr(presentation, "create_thumbnail", image)
+    result = service.prepare_presentation(approved_job["id"], "이 변화, 진짜일까?")
+    assert result["presentation_status"] == "ready"
+    assert result["thumbnail_title"] == "이 변화, 진짜일까?"
     assert result["artifacts"]["video"] == approved_job["artifacts"]["video"]
-    assert not result.get("cover_intro_seconds")
+    result = service.prepare_presentation(approved_job["id"], "직접 바꾼 문구")
+    assert result["thumbnail_title"] == "직접 바꾼 문구"
+    result = service.prepare_presentation(approved_job["id"])
+    assert result["thumbnail_title"] == "직접 바꾼 문구"
+    assert image.call_count == 2 and titles.call_count == 0
 
 
 @pytest.mark.parametrize("titles", [[], ["short"] * 3, ["동일한 제목입니다"] * 3, [None, 3, {}]])

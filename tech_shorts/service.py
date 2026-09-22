@@ -16,23 +16,26 @@ class Service:
     def create(self, data, allow_local=False):
         return self.store.create(validate_inputs(data, allow_local))
 
-    def prepare_presentation(self, job_id):
+    def prepare_presentation(self, job_id, thumbnail_title=None):
         from .presentation import prepare
-        return prepare(job_id, self.settings, self.store, self.artifacts)
+        return prepare(job_id, self.settings, self.store, self.artifacts, thumbnail_title)
 
     def create_auto(self, options=None):
         from .content import all_trends
         from .sources import article_notes
         import hashlib
+        import json
         from datetime import datetime, timedelta, timezone
         options = options or {}
         defaults = {"voice": self.settings.voice, "speed": self.settings.speed,
                     "tts_provider": self.settings.tts_provider}
-        defaults.update({k: options[k] for k in ("category", "voice", "speed", "tts_provider", "bgm", "subtitle_style") if k in options})
-        category = validate_inputs({"topic": "자동 주제", "notes": "자동 자료", **defaults})["category"]
+        defaults.update({k: options[k] for k in ("category", "voice", "elevenlabs_voice_id", "speed", "tts_provider", "bgm", "bgm_level", "visual_style", "subtitle_style") if k in options})
+        normalized = validate_inputs({"topic": "자동 주제", "notes": "자동 자료", **defaults})
+        category = normalized["category"]
         # Daily KST identity must also work on Windows without an IANA tz database.
         day = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
         identity = "automatic:" + day + (":" + category if category != "it" else "")
+        identity += ":" + json.dumps(normalized, sort_keys=True, ensure_ascii=False)
         job_id = hashlib.sha256(identity.encode()).hexdigest()[:32]
         try:
             return self.store.get(job_id)

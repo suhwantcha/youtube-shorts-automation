@@ -27,8 +27,8 @@ def test_render_end_to_end_without_network(service, monkeypatch, tmp_path):
     assert result["quality"]["background_music"] == "synthesized"
     assert (result["quality"]["width"],result["quality"]["height"]) == (360,640)
     assert abs(result["duration"] - result["quality"]["duration"]) < .5
-    assert set(result["artifacts"]) == {"audio","script","subtitles","video","poster","manifest","thumbnail","body_video","body_subtitles"}
-    assert result["cover_intro_seconds"] == .5
+    assert set(result["artifacts"]) == {"audio","script","subtitles","video","poster","manifest","thumbnail"}
+    assert result["cover_intro_seconds"] == 0
     assert len(result["title_suggestions"]) == 3
     assert result["presentation_status"] == "ready"
     assert result["uploads"] == {}

@@ -98,7 +98,7 @@ def korean_font():
     raise ValueError("한글 폰트가 없습니다. KOREAN_FONT에 폰트 파일 경로를 지정해주세요.")
 
 
-def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180, scene_durations=None, subtitle_style="focus", bgm=True, bgm_path="", music_mood="neutral", progress=None):
+def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height=1920, fps=30, max_duration=180, scene_durations=None, subtitle_style="focus", bgm=True, bgm_path="", music_mood="neutral", bgm_level="normal", progress=None):
     from tempfile import TemporaryDirectory
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +124,7 @@ def render(audio_path, backgrounds, srt_path, output_path, *, width=1080, height
                 bed = work / "music.wav"
                 music.synthesize(bed, duration=duration, mood=music_mood)
             narration = work / "mix.wav"
-            music.mix(audio_path, bed, narration, duration)
+            music.mix(audio_path, bed, narration, duration, level=bgm_level)
         font_name = "Malgun Gothic" if os.name == "nt" else "Noto Sans CJK KR"
         (work / "captions.ass").write_text(to_ass(Path(srt_path).read_text(encoding="utf-8-sig"), font_name, subtitle_style), encoding="utf-8")
         fonts = work / "fonts"
